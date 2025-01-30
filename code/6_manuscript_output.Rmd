@@ -1,0 +1,910 @@
+---
+title: "CCU064 Manuscript Tables to Export"
+author: "CSS"
+date: '2024-09-13'
+output:
+  pdf_document: default
+  html_document: default
+---
+<style>
+body {
+text-align: justify}
+</style>
+
+This document produces several summary tables and regression results tables, which may be included in our next manuscript. These will accompany several figures also produced with this code.
+A cohort of individuals 16 to 50 years old delivering in England hospitals was created, in order to investigate how gestational diabetes diagnosis and other pregnancy outcomes have changed over time, with particular interest in the COVID19 pandemic. The cohort was based on HES data to identify delivery episodes, obtaining additional information from HES, MSDS and GDPPR.
+
+```{r moms, include = T, eval = T, echo = F, warning = F, fig.align = 'center', fig.width = 10}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+options(scipen = 999)
+
+library(odbc)
+library(DBI)
+library(dplyr)
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+library(kableExtra)
+library(gridExtra)
+library(scales)
+library(RColorBrewer)
+setwd("~/collab/CCU064/2_main_analysis")
+
+##Load up the cohort.
+cohort <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/2_main_analysis/del_cohort.Rds")
+
+##IMD into quintiles.
+cohort$IMD5 <- ntile(cohort$IMD, 5)
+##Inferring loss through GA.
+cohort[which(cohort$del_GA < 20), "loss"] <- T
+##Removing BW for losses.
+cohort[cohort$loss == T, "BW"] <- NA
+
+##Categorising delivery method to T/F.
+cohort$cesarean <- grepl("Cesarean", cohort$del_method2)
+cohort$EMcsec <- grepl("Emergency", cohort$del_method2)
+cohort$ELcsec <- grepl("Elective", cohort$del_method2)
+##Emergency and elective need to be compared to spontaneous.
+cohort[grep("Emergency|Instrumental", cohort$del_method2), "ELcsec"] <- NA
+cohort[grep("Elective|Instrumental", cohort$del_method2), "EMcsec"] <- NA
+
+##Define the rounding function for exporting:
+round_any = function(x, accuracy, f = round) {
+  f(x/ accuracy) * accuracy
+}
+
+##Count months function:
+elapsed_months = function(end_date, start_date) {
+    ed <- as.POSIXlt(end_date)
+    sd <- as.POSIXlt(start_date)
+    12 * (ed$year - sd$year) + (ed$mon - sd$mon)
+}
+
+
+##Yearly summary table
+########################
+
+dum <- cohort
+dum$age30 <- dum$age >= 30
+dum2 <- dum %>% group_by(year = floor_date(deldate, "year")) %>% 
+  summarize(n = round_any(n(),5),
+            GDM = paste0(round_any(sum(HES_GDM),5), " (", round(sum(HES_GDM)/n*100,3),"%)"),
+            T1D = paste0(round_any(sum(HES_T1D),5), " (", round(sum(HES_T1D)/n*100,3),"%)"),
+            T2D = paste0(round_any(sum(HES_T2D),5), " (", round(sum(HES_T2D)/n*100,3),"%)"),
+            age = paste0(round(mean(age, na.rm = T),3), "+-", round(sd(age, na.rm = T),3)),
+            age30 = paste0(round_any(sum(age30),5), " (", round(sum(age30)/n*100,3),"%)"),
+            BMI = paste(round(mean(BMI_MSDS, na.rm = T),3), "+-", round(sd(BMI_MSDS, na.rm = T),3)),
+            obese = paste0(round_any(sum(BMI_cat == "Obese", na.rm = T),5), " (", round(sum(BMI_cat == "Obese", na.rm = T)/sum(!is.na(BMI_cat))*100,3),"%)"),
+            GA = paste0(round(mean(del_GA, na.rm = T),3), "+-", round(sd(del_GA, na.rm = T),3)),
+            preterm = paste0(round_any(sum(preterm, na.rm = T),5), " (", round(sum(preterm, na.rm = T)/sum(!is.na(preterm))*100,3),"%)"),
+            IMD = paste0(round(mean(IMD5, na.rm = T),3), "+-", round(sd(IMD5, na.rm = T),3)),
+            deprived = paste0(round_any(sum(IMD_cat == "High", na.rm = T),5), " (", round(sum(IMD_cat == "High", na.rm = T)/sum(!is.na(IMD_cat))*100,3),"%)"),
+            white = paste0(round_any(sum(ethnos2 == "White Background"),5), " (", round(sum(ethnos2 == "White Background")/n*100,3),"%)"),
+            other = paste0(round_any(sum(ethnos2 == "Non White Background"),5), " (", round(sum(ethnos2 == "Non White Background")/n*100,3),"%)"),
+            unav = paste0(round_any(sum(ethnos2 == "Unavailable"),5), " (", round(sum(ethnos2 == "Unavailable")/n*100,3),"%)"))
+
+dum3 <- dum %>% group_by(month = floor_date(deldate, "month")) %>% summarize(n = n(), gdm = sum(HES_GDM)) %>% group_by(year = floor_date(month, "year")) %>% summarize(monthly = round_any(mean(n),5), gdm = round_any(mean(gdm),5), perc = round(gdm/monthly*100,3))
+dum2 <- merge(dum2, dum3[,1:2], by = "year")
+dum2 <- rbind(dum2, c("2023-01-01", round_any(nrow(cohort),5),
+                      paste0(round_any(sum(cohort$HES_GDM),5), " (", round(sum(cohort$HES_GDM)/nrow(cohort)*100,3),"%)"), paste0(round_any(sum(cohort$HES_T1D),5), " (", round(sum(cohort$HES_T1D)/nrow(cohort)*100,3),"%)"),
+                      paste0(round_any(sum(cohort$HES_T2D),5), " (", round(sum(cohort$HES_T2D)/nrow(cohort)*100,3),"%)"), paste0(round(mean(cohort$age, na.rm = T),3), "+-", round(sd(cohort$age, na.rm = T),3)),
+                      paste0(round_any(sum(cohort$age30),5), " (", round(sum(cohort$age30)/nrow(cohort)*100,3),"%)"), paste0(round(mean(cohort$BMI_MSDS, na.rm = T),3), "+-", round(sd(cohort$BMI_MSDS, na.rm = T),3)),
+                      paste0(round_any(sum(cohort$BMI_cat == "Obese", na.rm = T),5), " (", round(sum(cohort$BMI_cat == "Obese", na.rm = T)/sum(!is.na(cohort$BMI_cat))*100,3),"%)"),
+                      paste0(round(mean(cohort$del_GA, na.rm = T),3), "+-", round(sd(cohort$del_GA, na.rm = T),3)),
+                      paste0(round_any(sum(cohort$preterm, na.rm = T),5), " (", round(sum(cohort$preterm, na.rm = T)/sum(!is.na(cohort$preterm))*100,3),"%)"),
+                      paste0(round(mean(cohort$IMD5, na.rm = T),3), "+-", round(sd(cohort$IMD5, na.rm = T),3)),
+                      paste0(round_any(sum(cohort$IMD_cat == "High", na.rm = T),5), " (", round(sum(cohort$IMD_cat == "High", na.rm = T)/sum(!is.na(cohort$IMD_cat))*100,3),"%)"),
+                      paste0(round_any(sum(cohort$ethnos2 == "White Background"),5), " (", round(sum(cohort$ethnos2 == "White Background")/nrow(cohort)*100,3),"%)"),
+                      paste0(round_any(sum(cohort$ethnos2 == "Non White Background"),5), " (", round(sum(cohort$ethnos2 == "Non White Background")/nrow(cohort)*100,3),"%)"),
+                      paste0(round_any(sum(cohort$ethnos2 == "Unavailable"),5), " (", round(sum(cohort$ethnos2 == "Unavailable")/nrow(cohort)*100,3),"%)"),
+                      round_any(mean(dum3$monthly),5)))
+
+dum3 <- t(dum2[, c(2,17,3:9,12:16,10,11)])
+colnames(dum3) <- c("2018", "2019", "2020", "2021", "2022", "Total")
+rownames(dum3) <- c("Deliveries", "Monthly", "GDM", "T1D", "T2D", "Age", "Age >= 30", "BMI", "Obese", "IMD", "Deprived", "White BG", "Non White BG", "Unavailable BG",
+                    "GA", "Preterm")
+
+kable(dum3, align = "c", row.names = T) %>%
+  kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15) %>% column_spec(1, bold = T, border_right = T)
+
+rm(dum,dum2,dum3)
+
+```
+
+This table summarises the cohort of pregnant individuals into various features by year. The table presents the yearly count (+ percentage) or yearly mean (+ standard deviation) for different variables related to maternal demographics. All counts in the table have been rounded to the nearest 5 and any counts under 10 were suppressed. GDM: gestational diabetes. T1D: Type 1 Diabetes. T2D: Type 2 Diabetes. BMI: Body Mass Index. IMD: Index of Multiple Deprivation. BG: Background. GA: Gestational Age.
+
+-----
+
+```{r singletons, include = T, eval = T, echo = F, fig.align = 'center', fig.width = 10}
+
+##Outcomes for single births
+singletons <- cohort[which(cohort$n_baby == 1 | is.na(cohort$n_baby)), ]
+
+##Loading WHO Growth Curves for SGA and LGA.
+males <- data.frame("round_GA" = c(14:40),
+                    "SGA_thres" = c(79,100,127,158,196,241,293,354,424,503,592,692,803,924,1055,1197,1349,1509,1677,1852,2032,2217,2404,2591,2778,2962,3142),
+                    "LGA_thres" = c(105,134,169,210,260,320,389,469,561,666,785,917,1063,1224,1399,1587,1788,2000,2224,2456,2694,2938,3185,3432,3676,3916,4149),
+                    "sex" = "Male")
+females <- data.frame("round_GA" = c(14:40),
+                    "SGA_thres" = c(77,97,122,152,188,231,281,339,405,481,567,663,769,886,1013,1150,1296,1451,1614,1783,1957,2135,2314,2493,2670,2843,3010),
+                    "LGA_thres" = c(102,129,162,202,248,304,369,444,530,629,740,865,1003,1156,1323,1505,1699,1907,2127,2358,2598,2846,3099,3357,3616,3875,4131),
+                    "sex" = "Female")
+growth <- rbind(males, females)
+
+singletons$round_GA <- round(singletons$del_GA, 0)
+singletons <- merge(singletons, growth, by = c("round_GA","sex"), all.x = T)
+singletons$SGA <- NA
+singletons[!is.na(singletons$BW), "SGA"] <- singletons[!is.na(singletons$BW), "BW"] < singletons[!is.na(singletons$BW), "SGA_thres"]
+singletons$LGA <- NA
+singletons[!is.na(singletons$BW), "LGA"] <- singletons[!is.na(singletons$BW), "BW"] > singletons[!is.na(singletons$BW), "LGA_thres"]
+
+
+##Singletons yearly table
+###########################
+
+dum2 <- singletons %>% group_by(year = floor_date(deldate, "year")) %>% 
+  summarize(n = round_any(n(),5),
+            GDM = paste0(round_any(sum(HES_GDM),5), " (", round(sum(HES_GDM)/n*100,3),"%)"),
+            T1D = paste0(round_any(sum(HES_T1D),5), " (", round(sum(HES_T1D)/n*100,3),"%)"),
+            T2D = paste0(round_any(sum(HES_T2D),5), " (", round(sum(HES_T2D)/n*100,3),"%)"),
+            age = paste(round(mean(age, na.rm = T),3), "+-", round(sd(age, na.rm = T),3)),
+            IMD = paste0(round(mean(IMD5, na.rm = T),3), "+-", round(sd(IMD5, na.rm = T),3)),
+            deprived = paste0(round_any(sum(IMD_cat == "High", na.rm = T),5), " (", round(sum(IMD_cat == "High", na.rm = T)/sum(!is.na(IMD_cat))*100,3),"%)"),
+            white = paste0(round_any(sum(ethnos2 == "White Background"),5), " (", round(sum(ethnos2 == "White Background")/n*100,3),"%)"),
+            other = paste0(round_any(sum(ethnos2 == "Non White Background"),5), " (", round(sum(ethnos2 == "Non White Background")/n*100,3),"%)"),
+            GA = paste0(round(mean(del_GA, na.rm = T),3), "+-", round(sd(del_GA, na.rm = T),3)),
+            preterm = paste0(round_any(sum(preterm, na.rm = T),5), " (", round(sum(preterm, na.rm = T)/sum(!is.na(preterm))*100,3),"%)"),
+            loss = paste0(round_any(sum(loss),5), " (", round(sum(loss)/sum(!is.na(loss))*100,3),"%)"),
+            BWa = paste(round(mean(BW, na.rm = T),3), "+-", round(sd(BW, na.rm = T),3)),
+            BW2500 = paste0(round_any(sum(BW < 2500, na.rm = T),5), " (", round(sum(BW < 2500, na.rm = T)/sum(!is.na(BW))*100,3),"%)"),
+            BW4000 = paste0(round_any(sum(BW > 4000, na.rm = T),5), " (", round(sum(BW > 4000, na.rm = T)/sum(!is.na(BW))*100,3),"%)"),
+            SGA = paste0(round_any(sum(SGA, na.rm = T),5), " (", round(sum(SGA, na.rm = T)/sum(!is.na(SGA))*100,3),"%)"),
+            LGA = paste0(round_any(sum(LGA, na.rm = T),5), " (", round(sum(LGA, na.rm = T)/sum(!is.na(LGA))*100,3),"%)"),
+            spontaneous = paste0(round_any(sum(del_method2 == "Spontaneous", na.rm = T),5), 
+                                 " (", round(sum(del_method2 == "Spontaneous", na.rm = T)/sum(!is.na(del_method2))*100,3),"%)"),
+            cesarean = paste0(round_any(sum(grepl("Cesarean", del_method2), na.rm = T),5), 
+                              " (", round(sum(grepl("Cesarean", del_method2), na.rm = T)/sum(!is.na(del_method2))*100,3),"%)"),
+            EMcesarean = paste0(round_any(sum(EMcsec, na.rm = T),5), " (", round(sum(EMcsec, na.rm = T)/sum(!is.na(del_method2))*100,3),"%)"),
+            instrumental = paste0(round_any(sum(del_method2 == "Instrumental", na.rm = T),5), 
+                                 " (", round(sum(del_method2 == "Instrumental", na.rm = T)/sum(!is.na(del_method2))*100,3),"%)"))
+
+dum3 <- singletons %>% group_by(month = floor_date(deldate, "month")) %>% summarize(n = n(), gdm = sum(HES_GDM)) %>% group_by(year = floor_date(month, "year")) %>% summarize(monthly = round_any(mean(n),5), gdm = round_any(mean(gdm),5), perc = round(gdm/monthly*100,3))
+dum2 <- merge(dum2, dum3[,1:2], by = "year")
+
+dum2 <- rbind(dum2, c("2023-01-01", round_any(nrow(singletons),5), paste0(round_any(sum(singletons$HES_GDM),5), " (", round(sum(singletons$HES_GDM)/nrow(singletons)*100,3),"%)"),
+                      paste0(round_any(sum(singletons$HES_T1D),5), " (", round(sum(singletons$HES_T1D)/nrow(singletons)*100,3),"%)"),
+                      paste0(round_any(sum(singletons$HES_T2D),5), " (", round(sum(singletons$HES_T2D)/nrow(singletons)*100,3),"%)"),
+                      paste0(round(mean(singletons$age, na.rm = T),3), "+-", round(sd(singletons$age, na.rm = T),3)),
+                      paste(round(mean(singletons$IMD5, na.rm = T),3), "+-", round(sd(singletons$IMD5, na.rm = T),3)),
+                      paste0(round_any(sum(singletons$IMD_cat == "High", na.rm = T),5), " (", round(sum(singletons$IMD_cat == "High", na.rm = T)/sum(!is.na(singletons$IMD_cat))*100,3),"%)"),
+                      paste0(round_any(sum(singletons$ethnos2 == "White Background"),5), " (", round(sum(singletons$ethnos2 == "White Background")/nrow(singletons)*100,3),"%)"),
+                      paste0(round_any(sum(singletons$ethnos2 == "Non White Background"),5), " (", round(sum(singletons$ethnos2 == "Non White Background")/nrow(singletons)*100,3),"%)"),
+                      paste0(round(mean(singletons$del_GA, na.rm = T),3), "+-", round(sd(singletons$del_GA, na.rm = T),3)),
+                      paste0(round_any(sum(singletons$preterm, na.rm = T),5), " (", round(sum(singletons$preterm, na.rm = T)/sum(!is.na(singletons$preterm))*100,3),"%)"),
+                      paste0(round_any(sum(singletons$loss),5), " (", round(sum(singletons$loss)/sum(!is.na(singletons$loss))*100,3),"%)"),
+                      paste(round(mean(singletons$BW, na.rm = T),3), "+-", round(sd(singletons$BW, na.rm = T),3)),
+                      paste0(round_any(sum(singletons$BW < 2500, na.rm = T),5), " (", round(sum(singletons$BW < 2500, na.rm = T)/sum(!is.na(singletons$BW))*100,3),"%)"),
+                      paste0(round_any(sum(singletons$BW > 4000, na.rm = T),5), " (", round(sum(singletons$BW > 4000, na.rm = T)/sum(!is.na(singletons$BW))*100,3),"%)"),
+                      paste0(round_any(sum(singletons$SGA, na.rm = T),5), " (", round(sum(singletons$SGA, na.rm = T)/sum(!is.na(singletons$SGA))*100,3),"%)"),
+                      paste0(round_any(sum(singletons$LGA, na.rm = T),5), " (", round(sum(singletons$LGA, na.rm = T)/sum(!is.na(singletons$LGA))*100,3),"%)"),
+                      paste0(round_any(sum(singletons$del_method2 == "Spontaneous", na.rm = T),5), 
+                                 " (", round(sum(singletons$del_method2 == "Spontaneous", na.rm = T)/sum(!is.na(singletons$del_method2))*100,3),"%)"),
+                      paste0(round_any(sum(grepl("Cesarean", singletons$del_method2), na.rm = T),5), 
+                              " (", round(sum(grepl("Cesarean", singletons$del_method2), na.rm = T)/sum(!is.na(singletons$del_method2))*100,3),"%)"),
+                      paste0(round_any(sum(singletons$EMcsec, na.rm = T),5), " (", round(sum(singletons$EMcsec, na.rm = T)/sum(!is.na(singletons$del_method2))*100,3),"%)"),
+                      paste0(round_any(sum(singletons$del_method2 == "Instrumental", na.rm = T),5), 
+                                 " (", round(sum(singletons$del_method2 == "Instrumental", na.rm = T)/sum(!is.na(singletons$del_method2))*100,3),"%)"), round_any(mean(dum3$monthly),5)))
+
+dum3 <- t(dum2[, c(2,23,3:22)])
+colnames(dum3) <- c("2018", "2019", "2020", "2021", "2022", "Total")
+rownames(dum3) <- c("Deliveries", "Monthly", "GDM", "T1D", "T2D", "Age", "IMD", "Deprived", "White BG", "Non White BG", "GA",
+                    "Preterm", "Loss", "BW", "BW <2.5kg", "BW >4kg", "SGA", "LGA", "Spontaneous", "Cesarean", "Emergency C-Sec", "Instrumental")
+
+kable(dum3, align = "c", row.names = T) %>%
+  kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15) %>% column_spec(1, bold = T, border_right = T)
+
+rm(dum2,dum3,growth,females,males)
+
+```
+
+This table summarises features from the singleton offspring of the individuals included in our cohort by year. The table presents the yearly count (+ percentage) or yearly mean (+ standard deviation) for different variables related to maternal demographics or pregnancy outcomes. All counts in the table have been rounded to the nearest 5 and any counts under 10 were suppressed. GDM: gestational diabetes. T1D: Type 1 Diabetes. T2D: Type 2 Diabetes. BMI: Body Mass Index. IMD: Index of Multiple Deprivation. BG: Background. BW: Birth Weight. SGA: Small for Gestational Age. LGA: Large for Gestational Age. GA: Gestational Age.
+
+-----
+
+```{r bmi, include = T, eval = T, echo = F, fig.align = 'center', fig.width = 10}
+
+##BMI over the years table.
+dum2 <- cohort %>% group_by(year = floor_date(deldate, "year")) %>% summarize(n = round_any(n(),5), GDMperc = round(sum(HES_GDM)/n*100,3), BMI = round(mean(BMI_MSDS, na.rm = T),3), sd = round(sd(BMI_MSDS, na.rm = T),3), obese = round_any(sum(BMI_cat == "Obese", na.rm = T),5), obeseperc = round(sum(BMI_cat == "Obese", na.rm = T)/sum(!is.na(BMI_cat))*100,3), available = round_any(sum(!is.na(BMI_MSDS)),5), availableperc = round(sum(!is.na(BMI_MSDS))/n*100,3))
+
+kable(dum2, align = "c") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15)
+
+```
+
+This raw table summarises the Body Mass Index (BMI) information per year, including the total number of deliveries (n), mean BMI + standard deviation, and the percentage of obese individuals and those with gestational diabetes (GDM). This table will likely be used to inform the manuscript text, but it will be accompanied by a figure comparing BMI to GDM. All counts in the table have been rounded to the nearest 5 and any counts under 10 were suppressed.
+
+-----
+
+```{r bmi_plot, include = F, eval = F, echo = F, fig.align = 'center', fig.width = 10}
+
+dum2 <- cohort %>% group_by(month = floor_date(deldate, "month")) %>% summarize(n = n(), GDM = sum(HES_GDM)/n*100, BMI = mean(BMI_MSDS, na.rm = T), obese = sum(BMI_cat == "Obese", na.rm = T)/sum(!is.na(BMI_cat))*100, available = sum(!is.na(BMI_MSDS))/n*100)
+
+###Final plots
+dum2[which(dum2$month < "2020-01-01"), "BMI"] <- NA
+p2 <- ggplot() + geom_line(aes(x = month, y = BMI), data = dum2, color = "black") + theme_minimal() + geom_point(aes(x = month, y = BMI), color = "black", data = dum2) + geom_line() +
+    labs(x = "Birth Date", y = "Monthly Mean BMI") +
+  scale_x_date(date_breaks = "4 months", date_labels = "%b%Y", limits = c(as.Date("2018-01-01"), as.Date("2022-12-31")), expand = c(0, 0)) +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + scale_y_continuous(limits = c(26,28.5))
+
+p1 <- ggplot() + geom_line(aes(x = month, y = GDM), data = dum2, color = "#ad54d6") + theme_minimal() + geom_point(aes(x = month, y = GDM), color = "#ad54d6", data = dum2) +
+    labs(x = "Delivery Date", y = "Monthly GDM Percentage") +
+  scale_x_date(date_breaks = "4 months", date_labels = "%b%Y", limits = c(as.Date("2018-01-01"), as.Date("2022-12-31")), expand = c(0, 0)) +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + scale_y_continuous(limits = c(7.5,13), breaks = seq(7.5,13,0.5)) +
+  theme(axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank())
+
+#tiff("bmi_gdm.tiff", units = "in", width = 7, height = 6, res = 300)
+#png("bmi_gdm.png", units = "in", width = 7, height = 6, res = 300)
+grid.arrange(p1, p2, nrow = 2)
+dev.off()
+
+rm(dum2, dum3, p1, p2)
+```
+
+This figure shows the monthly percentage of gestational diabetes (GDM, top, purple) and mean body mass index (BMI, bottom, black) in the cohort. BMI measurements collected prior to 2020 were not displayed due to high percentages of missingness.
+
+-----
+
+```{r rates_over_time, include = F, eval = F, echo = F, fig.align = 'center', fig.width = 10}
+
+##Delivery and diabetes over time.
+dum3 <- cohort %>% group_by(year = floor_date(deldate, "year"), month = floor_date(deldate, "month")) %>%
+  summarize(n = n(), countt = sum(HES_GDM), type = "GDM")
+dum4 <- cohort %>% group_by(year = floor_date(deldate, "year"), month = floor_date(deldate, "month")) %>%
+  summarize(n = n(), countt = sum(HES_T1D), type = "T1D")
+dum5 <- cohort %>% group_by(year = floor_date(deldate, "year"), month = floor_date(deldate, "month")) %>%
+  summarize(n = n(), countt = sum(HES_T2D), type = "T2D")
+
+dum6 <- rbind(dum3, dum4, dum5)
+
+##Final plots.
+#tiff("dels.tiff", units = "in", width = 6, height = 5, res = 300)
+#png("dels.png", units = "in", width = 6, height = 5, res = 300)
+ggplot() + geom_line(aes(x = month, y = n, color = "black"), data = dum3) + theme_minimal() + geom_line(aes(x = month, y = countt*5, color = "#ad54d6"), data = dum3) +
+  geom_point(aes(x = month, y = n, color = "black"), data = dum3, size = 1) + geom_point(aes(x = month, y = countt*5, color = "#ad54d6"), data = dum3, size = 1) +
+  labs(x = "Birth Date", y = "Monthly Count") +  scale_x_date(date_breaks = "3 months", date_labels = "%b%Y", limits = c(as.Date("2018-01-01"), as.Date("2022-12-31")), expand = c(0.035, 0)) +
+  scale_color_manual(labels = c("GDM Births", "All Births"),values=c("#ad54d6","black"), name = NULL) +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + scale_y_continuous(limits = c(15000,51000), breaks = seq(15000,50000,5000))
+dev.off()
+
+##Plot of GDM with unadjusted axes.
+#tiff("dels2.tiff", units = "in", width = 6, height = 5, res = 300)
+#png("dels2.tiff", units = "in", width = 6, height = 5, res = 300)
+#ggplot() + theme_minimal() + geom_line(aes(x = month, y = countt, color = "#ad54d6"), data = dum3) + geom_point(aes(x = month, y = countt, color = "#ad54d6"), data = dum3, size = 1) +
+#  labs(x = "Birth Date", y = "Monthly Count") + scale_x_date(date_breaks = "3 months", date_labels = "%b%Y", limits = c(as.Date("2018-01-01"), as.Date("2022-12-31")), expand = c(0.035, 0)) +
+#  theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + scale_y_continuous(limits = c(15000/5,51000/5), breaks = seq(15000/5,50000/5,1000))
+#dev.off()
+
+#tiff("diabetes.tiff", units = "in", width = 6, height = 5, res = 300)
+#png("diabetes.png", units = "in", width = 6, height = 5, res = 300)
+ggplot() + geom_line(aes(x = month, y = countt/n*100, color = "GDM"), data = dum3) + theme_minimal() + geom_point(aes(x = month, y = countt/n*100, color = "GDM"), data = dum3, size = 1) +
+  geom_line(aes(x = month, y = (countt/n*100)*7, color = "T1D"), data = dum4) + geom_point(aes(x = month, y = (countt/n*100)*7, color = "T1D"), data = dum4, size = 1) +
+  geom_line(aes(x = month, y = (countt/n*100)*7, color = "T2D"), data = dum5) + geom_point(aes(x = month, y = (countt/n*100)*7, color = "T2D"), data = dum5, size = 1) +
+  labs(x = "Birth Date", y = "Monthly Percentage of Births") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b%Y", limits = c(as.Date("2018-01-01"), as.Date("2022-12-31")), expand = c(0.035, 0)) +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + scale_y_continuous(limits = c(2.5,13), breaks = seq(2.5,13,1)) +
+  scale_color_manual(values=c("#ad54d6", "#f2dc1a", "#21918c"), name = "Diagnosis:")
+dev.off()
+
+##Plot of T1D and T2D with unadjusted axes.
+#tiff("diabetes2.tiff", units = "in", width = 6, height = 5, res = 300)
+#ggplot() + theme_minimal() +
+#  geom_line(aes(x = month, y = (countt/n*100), color = "T1D"), data = dum4) + geom_point(aes(x = month, y = (countt/n*100), color = "T1D"), data = dum4) +
+#  geom_line(aes(x = month, y = (countt/n*100), color = "T2D"), data = dum5) + geom_point(aes(x = month, y = (countt/n*100), color = "T2D"), data = dum5) +
+#  labs(x = "Birth Date", y = "Monthly Percentage of Births") +
+#  scale_x_date(date_breaks = "3 months", date_labels = "%b%Y", limits = c(as.Date("2018-01-01"), as.Date("2022-12-31")), expand = c(0.035, 0)) +
+#  theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + scale_y_continuous(limits = c(2.5/7,13/7), breaks = seq(2.5/7,13/7,1/7))
+#dev.off()
+
+```
+
+The figure above displays the monthly percentage of gestational diabetes (GDM) by deprivation level. High deprivation (teal) is defined as belonging to the lowest Index of Multiple Deprivation (IMD) quintile. Low deprivation (purple) is defined as belonging to the highest quintile of IMD. Average deprivation (yellow) is defined as belonging to quintiles 2 to 4 of IMD.
+The figure below displays the monthly percentage of gestational diabetes (GDM) by ethnic background category. Ethnic categories follow the UK Office of National Statistics Census 2021 categorization.
+
+-----
+
+```{r slopes, include = T, eval = T, echo = F, fig.align = 'center', fig.width = 10}
+
+##Interrupted time series analysis of deliveries and GDM.
+##Dataset for plotting.
+dum3 <- cohort %>% group_by(year = floor_date(deldate, "year"), month = floor_date(deldate, "month")) %>%
+  summarize(n = n(), countt = sum(HES_GDM), type = "GDM")
+dum3$perc <- dum3$countt/dum3$n*100
+dum3$covid <- "pre"
+dum3[which(dum3$month >= "2020-10-14"), "covid"] <- "post"
+dum3$month2 <- 0
+dum3[dum3$covid == "pre", "month2"] <- 1:sum(dum3$covid == "pre")
+dum3[dum3$covid == "post", "month2"] <- 1:sum(dum3$covid == "post")
+dum3$covid <- factor(dum3$covid, levels = c("pre", "post"))
+dum3$month3 <- dum3$month2
+dum3[dum3$covid == "pre", "month3"] <- 0
+dum3$monthname <- months(dum3$month)
+
+##Dataset for modelling (time in days, weeks or months).
+dum4 <- cohort %>% group_by(day = floor_date(deldate, "day")) %>%
+  summarize(n = n(), countt = sum(HES_GDM), type = "GDM")
+dum4$perc <- dum4$countt/dum4$n*100
+dum4$covid <- "pre"
+dum4[which(dum4$day >= "2020-10-14"), "covid"] <- "post"
+dum4$covid <- factor(dum4$covid, levels = c("pre", "post"))
+dum4$dayn <- 1:nrow(dum4)
+dum4$day2 <- 0
+dum4[dum4$covid == "post", "day2"] <- 1:sum(dum4$covid == "post")
+dum4$monthname <- months(dum4$day)
+dum4$week <- dum4$dayn/7
+dum4$week2 <- 0
+dum4[dum4$covid == "post", "week2"] <- dum4[dum4$covid == "post",]$day2/7
+dum4$month <- dum4$dayn/30
+dum4$month2 <- 0
+dum4[dum4$covid == "post", "month2"] <- dum4[dum4$covid == "post",]$day2/30
+
+##Time series with calendar month adjustments, effect in days
+###############################################################
+m1 <- lm(n ~ day + covid + day2 + monthname, data = dum4)
+m2 <- lm(countt ~ day + covid + day2 + monthname, data = dum4)
+m3 <- lm(perc ~ day + covid + day2 + monthname, data = dum4)
+
+dels <- data.frame("Coef" = round(m1$coefficients[1:4],3),
+                   "CI_low" = round(confint(m1)[1:4,1],3),
+                   "CI_high" = round(confint(m1)[1:4,2],3),
+                   "SE" = round(summary(m1)$coefficients[1:4,3],3),
+                   "Pval" = round(summary(m1)$coefficients[1:4,4],4))
+gdmm <- data.frame("Coef" = round(m2$coefficients[1:4],3),
+                   "CI_low" = round(confint(m2)[1:4,1],3),
+                   "CI_high" = round(confint(m2)[1:4,2],3),
+                   "SE" = round(summary(m2)$coefficients[1:4,3],3),
+                   "Pval" = round(summary(m2)$coefficients[1:4,4],4))
+gdmp <- data.frame("Coef" = round(m3$coefficients[1:4],3),
+                   "CI_low" = round(confint(m3)[1:4,1],3),
+                   "CI_high" = round(confint(m3)[1:4,2],3),
+                   "SE" = round(summary(m3)$coefficients[1:4,3],3),
+                   "Pval" = round(summary(m3)$coefficients[1:4,4],4))
+
+tab <- cbind(dels,gdmm,gdmp)
+rownames(tab) <- c("Intercept", "Delivery Date", "Immediate Change", "Slope Change")
+kable(tab, align = "c", caption = "Time Interrupted Series (daily effect)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T) %>% column_spec(c(1,6,11), border_right = T) %>% add_header_above(c(" ", "Deliveries" = 5, "GDM" = 5, "GDM %" = 5))
+
+
+##Time series with calendar month adjustments, effect in weeks
+################################################################
+m1 <- lm(n ~ week + covid + week2 + monthname, data = dum4)
+m2 <- lm(countt ~ week + covid + week2 + monthname, data = dum4)
+m3 <- lm(perc ~ week + covid + week2 + monthname, data = dum4)
+
+dels <- data.frame("Coef" = round(m1$coefficients[1:4],3),
+                   "CI_low" = round(confint(m1)[1:4,1],3),
+                   "CI_high" = round(confint(m1)[1:4,2],3),
+                   "SE" = round(summary(m1)$coefficients[1:4,3],3),
+                   "Pval" = round(summary(m1)$coefficients[1:4,4],4))
+gdmm <- data.frame("Coef" = round(m2$coefficients[1:4],3),
+                   "CI_low" = round(confint(m2)[1:4,1],3),
+                   "CI_high" = round(confint(m2)[1:4,2],3),
+                   "SE" = round(summary(m2)$coefficients[1:4,3],3),
+                   "Pval" = round(summary(m2)$coefficients[1:4,4],4))
+gdmp <- data.frame("Coef" = round(m3$coefficients[1:4],3),
+                   "CI_low" = round(confint(m3)[1:4,1],3),
+                   "CI_high" = round(confint(m3)[1:4,2],3),
+                   "SE" = round(summary(m3)$coefficients[1:4,3],3),
+                   "Pval" = round(summary(m3)$coefficients[1:4,4],4))
+
+tab <- cbind(dels,gdmm,gdmp)
+rownames(tab) <- c("Intercept", "Delivery Date", "Immediate Change", "Slope Change")
+kable(tab, align = "c", caption = "Time Interrupted Series (weekly effect)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T) %>% column_spec(c(1,6,11), border_right = T) %>% add_header_above(c(" ", "Deliveries" = 5, "GDM" = 5, "GDM %" = 5))
+
+
+##Time series with calendar month adjustments, monthly effect
+###############################################################
+m1 <- lm(n ~ month + covid + month2 + monthname, data = dum4)
+m2 <- lm(countt ~ month + covid + month2 + monthname, data = dum4)
+m3 <- lm(perc ~ month + covid + month2 + monthname, data = dum4)
+
+dels <- data.frame("Coef" = round(m1$coefficients[1:4],3),
+                   "CI_low" = round(confint(m1)[1:4,1],3),
+                   "CI_high" = round(confint(m1)[1:4,2],3),
+                   "SE" = round(summary(m1)$coefficients[1:4,3],3),
+                   "Pval" = round(summary(m1)$coefficients[1:4,4],4))
+gdmm <- data.frame("Coef" = round(m2$coefficients[1:4],3),
+                   "CI_low" = round(confint(m2)[1:4,1],3),
+                   "CI_high" = round(confint(m2)[1:4,2],3),
+                   "SE" = round(summary(m2)$coefficients[1:4,3],3),
+                   "Pval" = round(summary(m2)$coefficients[1:4,4],4))
+gdmp <- data.frame("Coef" = round(m3$coefficients[1:4],3),
+                   "CI_low" = round(confint(m3)[1:4,1],3),
+                   "CI_high" = round(confint(m3)[1:4,2],3),
+                   "SE" = round(summary(m3)$coefficients[1:4,3],3),
+                   "Pval" = round(summary(m3)$coefficients[1:4,4],4))
+
+tab <- cbind(dels,gdmm,gdmp)
+rownames(tab) <- c("Intercept", "Delivery Date", "Immediate Change", "Slope Change")
+kable(tab, align = "c", caption = "Time Interrupted Series (monthly effect)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T) %>% column_spec(c(1,6,11), border_right = T) %>% add_header_above(c(" ", "Deliveries" = 5, "GDM" = 5, "GDM %" = 5))
+
+rm(m1, m2, m3, results)
+
+```
+
+These raw tables summarise the result from linear regression models analysing total deliveries, gestational diabetes (GDM) deliveries and percentage of GDM over time using interrupted time series. The tables include the coefficients, 95% confident intervals (CI), standard errors (SE) and p values (Pval). The analyses are repeated using the time variables as days (top), weeks (middle), and months (bottom) to see which coefficient would be more easy to interpret. The “Immediate Change” covariate represents the change in GDM screening recommendations corrected for birth date. The “Slope Change” covariate represents the interaction term between birth date and intervention. “Calendar month” was included in the models to adjust for seasonality, but the coefficients have been omitted.
+
+-----
+
+```{r slopes_plots, include = F, eval = F, echo = F, fig.align = 'center', fig.width = 10}
+
+##Plotting the model results using monthly averages.
+dots <- c("#21918c","#ad54d6")
+m1 <- lm(n ~ month + covid + month3 + monthname, data = dum3)
+m1b <- lm(n ~ month + covid + month3, data = dum3)
+#tiff("del_trend.tiff", units = "in", width = 5, height = 5, res = 300)
+#png("del_trend.png", units = "in", width = 5, height = 5, res = 300)
+plot(n ~ month, data = dum3, xlab = "Time", ylab = "Monthly Births", col = dots[factor(covid)], pch = 19)
+#lines(dum3$month, m1$fitted.values, col = "black", lwd = 2)
+lines(dum3$month, m1b$fitted.values, col = "#00000088", lwd = 2, lty = 3)
+dev.off()
+
+m2 <- lm(countt ~ month + covid + month3 + monthname, data = dum3)
+m2b <- lm(countt ~ month + covid + month3, data = dum3)
+#tiff("gdm_trend.tiff", units = "in", width = 5, height = 5, res = 300)
+#png("gdm_trend.png", units = "in", width = 5, height = 5, res = 300)
+plot(countt ~ month, data = dum3, xlab = "Time", ylab = "Monthly GDM Births", col = dots[factor(covid)], pch = 19)
+#lines(dum3$month, m2$fitted.values, col = "black", lwd = 2)
+lines(dum3$month, m2b$fitted.values, col = "#00000088", lwd = 2, lty = 3)
+dev.off()
+
+m3 <- lm(perc ~ month + covid + month3 + monthname, data = dum3)
+m3b <- lm(perc ~ month + covid + month3, data = dum3)
+#tiff("gdmp_trend.tiff", units = "in", width = 5, height = 5, res = 300)
+#png("gdmp_trend.png", units = "in", width = 5, height = 5, res = 300)
+plot(perc ~ month, data = dum3, xlab = "Time", ylab = "Monthly GDM Percentage", col = dots[factor(covid)], pch = 19)
+#lines(dum3$month, m3$fitted.values, col = "black", lwd = 2)
+lines(dum3$month, m3b$fitted.values, col = "#00000088", lwd = 2, lty = 3)
+dev.off()
+
+```
+
+The figures present the linear regression over the scatterplot of monthly total births (top), gestational diabetes (GDM) births (middle), and GDM percentage (bottom). The coloured dots represent observations from the two sub-cohorts: Baseline in teal (January 2018 to October 2020) and Intervention in purple (November 2020 to December 2022).
+
+-----
+
+```{r imd_ethno, include = T, eval = T, echo = F, fig.align = 'center', fig.width = 10}
+
+##GDM by deprivation
+######################
+
+dum3 <- cohort %>% group_by(year = floor_date(deldate, "year"), IMD_cat) %>% summarise(n = n(), gdm = sum(HES_GDM), perc = sum(HES_GDM)/n*100)
+dum3 <- dum3[!is.na(dum3$IMD_cat), ]
+
+t2 <- cbind("IMD Cat" = c("2018", "2019", "2020", "2021", "2022", "Total"),
+            "High" = c(paste0(round_any(dum3[3,4],5)," (",round(dum3[3,5],3),"%)"),
+                       paste0(round_any(dum3[6,4],5)," (",round(dum3[6,5],3),"%)"),
+                       paste0(round_any(dum3[9,4],5)," (",round(dum3[9,5],3),"%)"),
+                       paste0(round_any(dum3[12,4],5)," (",round(dum3[12,5],3),"%)"),
+                       paste0(round_any(dum3[15,4],5)," (",round(dum3[15,5],3),"%)"),
+                       paste0(round_any(sum(dum3[dum3$IMD_cat == "High",4]),5), " (",
+                              round(sum(dum3[dum3$IMD_cat == "High",4])/sum(dum3[dum3$IMD_cat == "High",3])*100,3), "%)")),
+            "Average" = c(paste0(round_any(dum3[1,4],5)," (",round(dum3[1,5],3),"%)"),
+                       paste0(round_any(dum3[4,4],5)," (",round(dum3[4,5],3),"%)"),
+                       paste0(round_any(dum3[7,4],5)," (",round(dum3[7,5],3),"%)"),
+                       paste0(round_any(dum3[10,4],5)," (",round(dum3[10,5],3),"%)"),
+                       paste0(round_any(dum3[13,4],5)," (",round(dum3[13,5],3),"%)"),
+                       paste0(round_any(sum(dum3[dum3$IMD_cat == "Average",4]),5), " (",
+                              round(sum(dum3[dum3$IMD_cat == "Average",4])/sum(dum3[dum3$IMD_cat == "Average",3])*100,3), "%)")),
+            "Low" = c(paste0(round_any(dum3[2,4],5)," (",round(dum3[2,5],3),"%)"),
+                       paste0(round_any(dum3[5,4],5)," (",round(dum3[5,5],3),"%)"),
+                       paste0(round_any(dum3[8,4],5)," (",round(dum3[8,5],3),"%)"),
+                       paste0(round_any(dum3[11,4],5)," (",round(dum3[11,5],3),"%)"),
+                       paste0(round_any(dum3[14,4],5)," (",round(dum3[14,5],3),"%)"),
+                       paste0(round_any(sum(dum3[dum3$IMD_cat == "Low",4]),5), " (",
+                              round(sum(dum3[dum3$IMD_cat == "Low",4])/sum(dum3[dum3$IMD_cat == "Low",3])*100,3), "%)")))
+
+kable(t(t2), align = "c") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15) %>%
+  column_spec(1, bold = T) %>% row_spec(1, bold = T)
+
+
+##GDM by ethnicity
+####################
+
+dum3 <- cohort %>% group_by(year = floor_date(deldate, "year"), ethnos) %>% summarise(n = n(), gdm = sum(HES_GDM), perc = sum(HES_GDM)/n*100)
+dum3$ethnos <- sub(" Background", "", dum3$ethnos)
+dum4 <- cohort %>% group_by(year = floor_date(deldate, "year"), ethnos2) %>% summarise(n = n(), gdm = sum(HES_GDM), perc = sum(HES_GDM)/n*100)
+dum4$ethnos2 <- sub(" Background", "", dum4$ethnos2)
+
+t3 <- cbind("Ethnic Group" = c("2018", "2019", "2020", "2021", "2022", "Total"),
+            "White" = c(paste0(round_any(dum3[6,4],5)," (",round(dum3[6,5],3),"%)"),
+                       paste0(round_any(dum3[12,4],5)," (",round(dum3[12,5],3),"%)"),
+                       paste0(round_any(dum3[18,4],5)," (",round(dum3[18,5],3),"%)"),
+                       paste0(round_any(dum3[24,4],5)," (",round(dum3[24,5],3),"%)"),
+                       paste0(round_any(dum3[30,4],5)," (",round(dum3[30,5],3),"%)"),
+                       paste0(round_any(sum(dum3[dum3$ethnos == "White",4]),5), " (",
+                              round(sum(dum3[dum3$ethnos == "White",4])/sum(dum3[dum3$ethnos == "White",3])*100,3), "%)")),
+            "Non-White" = c(paste0(round_any(dum4[2,4],5)," (",round(dum4[2,5],3),"%)"),
+                       paste0(round_any(dum4[5,4],5)," (",round(dum4[5,5],3),"%)"),
+                       paste0(round_any(dum4[8,4],5)," (",round(dum4[8,5],3),"%)"),
+                       paste0(round_any(dum4[11,4],5)," (",round(dum4[11,5],3),"%)"),
+                       paste0(round_any(dum4[14,4],5)," (",round(dum4[14,5],3),"%)"),
+                       paste0(round_any(sum(dum4[dum4$ethnos2 == "Non White",4]),5), " (",
+                              round(sum(dum4[dum4$ethnos2 == "Non White",4])/sum(dum4[dum4$ethnos2 == "Non White",3])*100,3), "%)")),
+            "Asian" = c(paste0(round_any(dum3[1,4],5)," (",round(dum3[1,5],3),"%)"),
+                       paste0(round_any(dum3[7,4],5)," (",round(dum3[7,5],3),"%)"),
+                       paste0(round_any(dum3[13,4],5)," (",round(dum3[13,5],3),"%)"),
+                       paste0(round_any(dum3[19,4],5)," (",round(dum3[19,5],3),"%)"),
+                       paste0(round_any(dum3[25,4],5)," (",round(dum3[25,5],3),"%)"),
+                       paste0(round_any(sum(dum3[dum3$ethnos == "Asian",4]),5), " (",
+                              round(sum(dum3[dum3$ethnos == "Asian",4])/sum(dum3[dum3$ethnos == "Asian",3])*100,3), "%)")),
+            "Black" = c(paste0(round_any(dum3[2,4],5)," (",round(dum3[2,5],3),"%)"),
+                       paste0(round_any(dum3[8,4],5)," (",round(dum3[8,5],3),"%)"),
+                       paste0(round_any(dum3[14,4],5)," (",round(dum3[14,5],3),"%)"),
+                       paste0(round_any(dum3[20,4],5)," (",round(dum3[20,5],3),"%)"),
+                       paste0(round_any(dum3[26,4],5)," (",round(dum3[26,5],3),"%)"),
+                       paste0(round_any(sum(dum3[dum3$ethnos == "Black",4]),5), " (",
+                              round(sum(dum3[dum3$ethnos == "Black",4])/sum(dum3[dum3$ethnos == "Black",3])*100,3), "%)")),
+            "Mixed" = c(paste0(round_any(dum3[3,4],5)," (",round(dum3[3,5],3),"%)"),
+                       paste0(round_any(dum3[9,4],5)," (",round(dum3[9,5],3),"%)"),
+                       paste0(round_any(dum3[15,4],5)," (",round(dum3[15,5],3),"%)"),
+                       paste0(round_any(dum3[21,4],5)," (",round(dum3[21,5],3),"%)"),
+                       paste0(round_any(dum3[27,4],5)," (",round(dum3[27,5],3),"%)"),
+                       paste0(round_any(sum(dum3[dum3$ethnos == "Mixed",4]),5), " (",
+                              round(sum(dum3[dum3$ethnos == "Mixed",4])/sum(dum3[dum3$ethnos == "Mixed",3])*100,3), "%)")),
+            "Other" = c(paste0(round_any(dum3[4,4],5)," (",round(dum3[4,5],3),"%)"),
+                       paste0(round_any(dum3[10,4],5)," (",round(dum3[10,5],3),"%)"),
+                       paste0(round_any(dum3[16,4],5)," (",round(dum3[16,5],3),"%)"),
+                       paste0(round_any(dum3[22,4],5)," (",round(dum3[22,5],3),"%)"),
+                       paste0(round_any(dum3[28,4],5)," (",round(dum3[28,5],3),"%)"),
+                       paste0(round_any(sum(dum3[dum3$ethnos == "Other",4]),5), " (",
+                              round(sum(dum3[dum3$ethnos == "Other",4])/sum(dum3[dum3$ethnos == "Other",3])*100,3), "%)")),
+            "Unavailable" = c(paste0(round_any(dum3[5,4],5)," (",round(dum3[5,5],3),"%)"),
+                       paste0(round_any(dum3[11,4],5)," (",round(dum3[11,5],3),"%)"),
+                       paste0(round_any(dum3[17,4],5)," (",round(dum3[17,5],3),"%)"),
+                       paste0(round_any(dum3[23,4],5)," (",round(dum3[23,5],3),"%)"),
+                       paste0(round_any(dum3[29,4],5)," (",round(dum3[29,5],3),"%)"),
+                       paste0(round_any(sum(dum3[dum3$ethnos == "Unavailable",4]),5), " (",
+                              round(sum(dum3[dum3$ethnos == "Unavailable",4])/sum(dum3[dum3$ethnos == "Unavailable",3])*100,3), "%)")))
+
+kable(t(t3), align = "c") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15) %>%
+  column_spec(1, bold = T) %>% row_spec(1, bold = T)
+
+```
+
+These tables summarise the number and percentage of individuals diagnosed with gestational diabetes (GDM) by year and Index of Multiple Deprivation (IMD) and ethnicity category. The table presents the yearly count (+ percentage). All counts in the table have been rounded to the nearest 5 and any counts under 10 were suppressed. High deprivation is defined as belonging to the lowest IMD quintile. Low deprivation is defined as belonging to the highest IMD quintile. Ethnic categories follow the UK Office of National Statistics Census 2021 categorization. The composite “Non-White” category includes all individuals belonging to Asian, Black, Mixed, or Other ethnic backgrounds.
+
+-----
+
+```{r imd_ethno_plots, include = F, eval = F, echo = F, fig.align = 'center', fig.width = 10}
+
+##GDM by deprivation plot
+###########################
+dum2 <- cohort %>% group_by(month = floor_date(deldate, "month"), IMD_cat) %>% summarise(dels = n(), countt = sum(HES_GDM))
+dum2$perc <- dum2$countt/dum2$dels*100
+dum2 <- dum2[!is.na(dum2$IMD_cat), ]
+
+#tiff("imd.tiff", units = "in", width = 6, height = 5, res = 300)
+#png("imd.png", units = "in", width = 6, height = 5, res = 300)
+ggplot(dum2) + geom_line(aes(x = month, y = perc, color = IMD_cat)) + geom_point(aes(x = month, y = perc, color = IMD_cat), size = 1) +
+  geom_smooth(aes(x = month, y = perc, color = IMD_cat), method = "lm", se = F, alpha = 0.8, linetype = "dashed", show.legend = F) +
+  scale_color_manual(breaks = c("Low", "Average", "High"), values=c("#ad54d6", "#f2dc1a", "#21918c"), name = "Deprivation Level:") +
+  theme_minimal() + labs(x = "Birth Date", y = "Monthy GDM Percentage within Category") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b%Y", limits = c(as.Date("2018-01-01"), as.Date("2022-12-31")), expand = c(0.035, 0)) +
+  theme(axis.text.x = element_text(angle = 90), legend.position = "top")
+dev.off()
+
+rm(dum2, dum3, t2)
+
+
+##GDM by ethnicity plot
+#########################
+dum2 <- cohort[cohort$ethnos != "Unavailable", ] %>% group_by(month = floor_date(deldate, "month"), ethnos) %>% summarise(n = n(), gdm = sum(HES_GDM), perc = sum(HES_GDM)/n*100)
+dum2$ethnos <- sub(" Background", "", dum2$ethnos)
+
+#tiff("ethnos.tiff", units = "in", width = 6, height = 5, res = 300)
+png("ethnos.png", units = "in", width = 6, height = 5, res = 300)
+ggplot(dum2) + geom_line(aes(x = month, y = perc, color = ethnos)) + geom_point(aes(x = month, y = perc, color = ethnos), size = 1) +
+  geom_smooth(aes(x = month, y = perc, color = ethnos), method = "lm", se = F, alpha = 0.8, linetype = "dashed", show.legend = F) +
+  scale_color_manual(values=c("#ad54d6", "#3b528b", "#5ec962", "#21918c", "#f2dc1a"), name = "Background:") +
+  theme_minimal() + labs(x = "Birth Date", y = "Monthly GDM Percentage within Category") +
+  scale_x_date(date_breaks = "3 months", date_labels = "%b%Y", limits = c(as.Date("2018-01-01"), as.Date("2022-12-31")), expand = c(0.035, 0)) +
+  theme(axis.text.x = element_text(angle = 90), legend.position = "top")
+dev.off()
+
+```
+
+The figures display the monthly percentage of gestational diabetes (GDM) by deprivation level (top) and ethnicity (bottom). High deprivation (teal) is defined as belonging to the lowest Index of Multiple Deprivation (IMD) quintile. Low deprivation (purple) is defined as belonging to the highest quintile of IMD. Average deprivation (yellow) is defined as belonging to quintiles 2 to 4 of IMD. Ethnic categories follow the UK Office of National Statistics Census 2021 categorization.
+
+-----
+
+```{r covid_models, include = T, eval = T, echo = F, fig.align = 'center', fig.width = 10}
+
+##Logistic regression to deal with categorical outcomes.
+singletons$covid <- NA
+singletons[which(singletons$deldate < "2020-10-14"), "covid"] <- "pre"
+singletons[which(singletons$deldate >= "2020-10-14"), "covid"] <- "post"
+singletons$covid <- factor(singletons$covid, levels = c("pre", "post"))
+pre <- singletons[singletons$covid == "pre", ]
+post <- singletons[singletons$covid == "post", ]
+
+outcomes <- singletons
+outcomes$days_passed <- as.numeric(difftime(outcomes$deldate, min(outcomes$deldate), units = "days"))
+outcomes$weeks_passed <- outcomes$days_passed/7
+outcomes$months_passed <- outcomes$days_passed/30
+outcomes$IMD_cat <- relevel(outcomes$IMD_cat, "Average")
+outcomes$ethnos <- factor(outcomes$ethnos, levels = c("White Background", "Asian Background", "Black Background", "Mixed Background", "Other Background", "Unavailable"))
+
+##SGA
+#######
+m1 <- glm(SGA ~ covid*months_passed + HES_GDM + age + IMD_cat + ethnos, data = outcomes, family = "binomial")
+ci <- confint(m1)
+
+dum <- data.frame("OR" = round(exp(m1$coefficients[c(1,3,2,13,4:12)]),3),
+                   "CI_low" = round(exp(ci[c(1,3,2,13,4:12),1]),3),
+                   "CI_high" = round(exp(ci[c(1,3,2,13,4:12),2]),3),
+                   "Pval" = round(summary(m1)$coefficients[c(1,3,2,13,4:12),4],4))
+rownames(dum) <- c("Intercept", "Months", "Pandemic", "Interaction", "GDM", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+
+kable(cbind(dum), align = "c", caption = "SGA (October)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T)
+
+m1 <- dum
+
+##LGA
+#######
+m2 <- glm(LGA ~ covid*months_passed + HES_GDM + age + IMD_cat + ethnos, data = outcomes, family = "binomial")
+ci <- confint(m2)
+
+dum <- data.frame("OR" = round(exp(m2$coefficients[c(1,3,2,13,4:12)]),3),
+                   "CI_low" = round(exp(ci[c(1,3,2,13,4:12),1]),3),
+                   "CI_high" = round(exp(ci[c(1,3,2,13,4:12),2]),3),
+                   "Pval" = round(summary(m2)$coefficients[c(1,3,2,13,4:12),4],4))
+rownames(dum) <- c("Intercept", "Months", "Pandemic", "Interaction", "GDM", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+
+kable(cbind(dum), align = "c", caption = "LGA (October)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T)
+
+m2 <- dum
+
+##Preterm
+###########
+m3 <- glm(preterm ~ covid*months_passed + HES_GDM + age + IMD_cat + ethnos, data = outcomes[which(outcomes$deldate < "2022-10-01"), ], family = "binomial")
+ci <- confint(m3)
+
+dum <- data.frame("OR" = round(exp(m3$coefficients[c(1,3,2,13,4:12)]),3),
+                   "CI_low" = round(exp(ci[c(1,3,2,13,4:12),1]),3),
+                   "CI_high" = round(exp(ci[c(1,3,2,13,4:12),2]),3),
+                   "Pval" = round(summary(m3)$coefficients[c(1,3,2,13,4:12),4],4))
+rownames(dum) <- c("Intercept", "Months", "Pandemic", "Interaction", "GDM", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+
+kable(cbind(dum), align = "c", caption = "Preterm (October)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T)
+
+m3 <- dum
+
+
+##Emergency Cesarean
+######################
+m6 <- glm(EMcsec ~ covid*months_passed + HES_GDM + age + IMD_cat + ethnos, data = outcomes, family = "binomial")
+ci <- confint(m6)
+
+dum <- data.frame("OR" = round(exp(m6$coefficients[c(1,3,2,13,4:12)]),3),
+                   "CI_low" = round(exp(ci[c(1,3,2,13,4:12),1]),3),
+                   "CI_high" = round(exp(ci[c(1,3,2,13,4:12),2]),3),
+                   "Pval" = round(summary(m6)$coefficients[c(1,3,2,13,4:12),4],4))
+rownames(dum) <- c("Intercept", "Months", "Pandemic", "Interaction", "GDM", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+
+kable(cbind(dum), align = "c", caption = "Emergency Caesarean (October)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T)
+
+m4 <- dum
+
+```
+
+Sample size per model:
+- **SGA** n = `r round_any(length(m1$fitted.values),5)`
+- **LGA** n = `r round_any(length(m2$fitted.values),5)`
+- **Preterm** n = `r round_any(length(m3$fitted.values),5)`
+- **Emergency Caesarean** n = `r round_any(length(m6$fitted.values),5)`
+
+These raw tables summarise the result from logistic regression models analysing 4 pregnancy outcomes. The tables include the odds ratio (OR), 95% confident intervals (CI), and p values (Pval). The numbers above represent the sample size for each of the models, rounded to the nearest 5. GDM: gestational diabetes. IMD: Index of Multiple Deprivation. SGA: Small for Gestational Age. LGA: Large for Gestational Age. The “Pandemic” covariate represents the change in gestational diabetes screening recommendations corrected for birth date. The “Interaction” represents the interaction term between both covariates. Emergency Caesarean birth was modelled against spontaneous birth. Preterm birth was defined as born between 20 and 37 weeks gestation. SGA and LGA defined using the World Health Organization Fetal Growth charts.
+
+-----
+
+```{r modelling1, include = T, eval = T, echo = F, fig.align = 'center', fig.width = 10}
+
+##Logistic regression to deal with categorical outcomes.
+##Investigate outcomes comparing no DB to GDM, separately for both cohorts.
+outcomes <- singletons
+outcomes$days_passed <- as.numeric(difftime(outcomes$deldate, min(outcomes$deldate), units = "days"))
+outcomes$weeks_passed <- outcomes$days_passed/7
+outcomes$months_passed <- outcomes$days_passed/30
+outcomes$IMD_cat <- relevel(outcomes$IMD_cat, "Average")
+outcomes$ethnos <- factor(outcomes$ethnos, levels = c("White Background", "Asian Background", "Black Background", "Mixed Background", "Other Background", "Unavailable"))
+outcomes$cesarean <- grepl("Cesarean", outcomes$del_method2)
+outcomes$EMcsec <- grepl("Emergency", outcomes$del_method2)
+outcomes$ELcsec <- grepl("Elective", outcomes$del_method2)
+##Emergency and elective need to be compared to spontaneous.
+outcomes[grep("Emergency|Instrumental", outcomes$del_method2), "ELcsec"] <- NA
+outcomes[grep("Elective|Instrumental", outcomes$del_method2), "EMcsec"] <- NA
+
+##Sub cohorts
+gdm <- outcomes[outcomes$HES_GDM == T, ]
+nodb <- outcomes[outcomes$HES_diabetes == F, ]
+
+##SGA
+#######
+m11 <- glm(SGA ~ months_passed + age + IMD_cat + ethnos, data = nodb, family = "binomial")
+m12 <- glm(SGA ~ months_passed + age + IMD_cat + ethnos, data = gdm, family = "binomial")
+aa <- confint(m11)
+bb <- confint(m12)
+
+MODnodb <- data.frame("OR" = round(exp(m11$coefficients),3),
+                   "CI_low" = round(exp(aa[,1]),3),
+                   "CI_high" = round(exp(aa[,2]),3),
+                   "Pval" = round(summary(m11)$coefficients[,4],4))
+rownames(MODnodb) <- c("Intercept", "Months", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+MODgdm <- data.frame("OR" = round(exp(m12$coefficients),3),
+                   "CI_low" = round(exp(bb[,1]),3),
+                   "CI_high" = round(exp(bb[,2]),3),
+                   "Pval" = round(summary(m12)$coefficients[,4],4))
+rownames(MODgdm) <- c("Intercept", "Months", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+
+m1 <- rbind(MODnodb,MODgdm)
+m1$model <- c(rep("No Diabetes",10), rep("GDM",10))
+
+kable(cbind(MODnodb, MODgdm), align = "c", caption = "SGA No Diabetes vs GDM (March)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T) %>% column_spec(c(1,5), border_right = T) %>% add_header_above(c(" ", "No DB" = 4, "GDM" = 4))
+
+##LGA
+#######
+m21 <- glm(LGA ~ months_passed + age + IMD_cat + ethnos, data = nodb, family = "binomial")
+m22 <- glm(LGA ~ months_passed + age + IMD_cat + ethnos, data = gdm, family = "binomial")
+aa <- confint(m21)
+bb <- confint(m22)
+
+MODnodb <- data.frame("OR" = round(exp(m21$coefficients),3),
+                   "CI_low" = round(exp(aa[,1]),3),
+                   "CI_high" = round(exp(aa[,2]),3),
+                   "Pval" = round(summary(m21)$coefficients[,4],4))
+rownames(MODnodb) <- c("Intercept", "Months", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+MODgdm <- data.frame("OR" = round(exp(m22$coefficients),3),
+                   "CI_low" = round(exp(bb[,1]),3),
+                   "CI_high" = round(exp(bb[,2]),3),
+                   "Pval" = round(summary(m22)$coefficients[,4],4))
+rownames(MODgdm) <- c("Intercept", "Months", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+
+m2 <- rbind(MODnodb,MODgdm)
+m2$model <- c(rep("No Diabetes",10), rep("GDM",10))
+
+kable(cbind(MODnodb, MODgdm), align = "c", caption = "LGA No Diabetes vs GDM (March)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T) %>% column_spec(c(1,5), border_right = T) %>% add_header_above(c(" ", "No DB" = 4, "GDM" = 4))
+
+##Preterm
+###########
+m31 <- glm(preterm ~ months_passed + age + IMD_cat + ethnos, data = nodb[which(nodb$deldate < "2022-10-01"), ], family = "binomial")
+m32 <- glm(preterm ~ months_passed + age + IMD_cat + ethnos, data = gdm[which(gdm$deldate < "2022-10-01"), ], family = "binomial")
+aa <- confint(m31)
+bb <- confint(m32)
+
+MODnodb <- data.frame("OR" = round(exp(m31$coefficients),3),
+                   "CI_low" = round(exp(aa[,1]),3),
+                   "CI_high" = round(exp(aa[,2]),3),
+                   "Pval" = round(summary(m31)$coefficients[,4],4))
+rownames(MODnodb) <- c("Intercept", "Months", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+MODgdm <- data.frame("OR" = round(exp(m32$coefficients),3),
+                   "CI_low" = round(exp(bb[,1]),3),
+                   "CI_high" = round(exp(bb[,2]),3),
+                   "Pval" = round(summary(m32)$coefficients[,4],4))
+rownames(MODgdm) <- c("Intercept", "Months", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+
+m3 <- rbind(MODnodb,MODgdm)
+m3$model <- c(rep("No Diabetes",10), rep("GDM",10))
+
+kable(cbind(MODnodb, MODgdm), align = "c", caption = "Preterm No Diabetes vs GDM (March)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T) %>% column_spec(c(1,5), border_right = T) %>% add_header_above(c(" ", "No DB" = 4, "GDM" = 4))
+
+
+##Emergency Caesarean
+#######################
+m61 <- glm(EMcsec ~ months_passed + age + IMD_cat + ethnos, data = nodb, family = "binomial")
+m62 <- glm(EMcsec ~ months_passed + age + IMD_cat + ethnos, data = gdm, family = "binomial")
+aa <- confint(m61)
+bb <- confint(m62)
+
+MODnodb <- data.frame("OR" = round(exp(m61$coefficients),3),
+                   "CI_low" = round(exp(aa[,1]),3),
+                   "CI_high" = round(exp(aa[,2]),3),
+                   "Pval" = round(summary(m61)$coefficients[,4],4))
+rownames(MODnodb) <- c("Intercept", "Months", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+MODgdm <- data.frame("OR" = round(exp(m62$coefficients),3),
+                   "CI_low" = round(exp(bb[,1]),3),
+                   "CI_high" = round(exp(bb[,2]),3),
+                   "Pval" = round(summary(m62)$coefficients[,4],4))
+rownames(MODgdm) <- c("Intercept", "Months", "Age", "Low Dep.", "High Dep.", "Asian Ethn.", "Black Ethn.", "Mixed Ethn.", "Other Ethn.", "Unavailable Ethn.")
+
+m4 <- rbind(MODnodb,MODgdm)
+m4$model <- c(rep("No Diabetes",10), rep("GDM",10))
+
+kable(cbind(MODnodb, MODgdm), align = "c", caption = "Emergency Cesarean No Diabetes vs GDM (March)") %>% kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = F, font_size = 15, position = "left") %>% column_spec(1, bold = T) %>% column_spec(c(1,5), border_right = T) %>% add_header_above(c(" ", "No DB" = 4, "GDM" = 4))
+
+
+```
+
+Sample size per model:
+- **SGA** noDB n = `r round_any(length(m11$fitted.values),5)`
+- **SGA** gdm n = `r round_any(length(m12$fitted.values),5)`
+- **LGA** noDB n = `r round_any(length(m21$fitted.values),5)`
+- **LGA** gdm n = `r round_any(length(m22$fitted.values),5)`
+- **Preterm** noDB n = `r round_any(length(m31$fitted.values),5)`
+- **Preterm** gdm n = `r round_any(length(m32$fitted.values),5)`
+- **Emergency Cesarean** noDB n = `r round_any(length(m61$fitted.values),5)`
+- **Emergency Cesarean** gdm n = `r round_any(length(m62$fitted.values),5)`
+
+
+These raw tables summarise the result from logistic regression models analysing 4 pregnancy outcomes, but separately for individuals diagnosed with GDM and without diabetes. The tables include the odds ratio (OR), 95% confident intervals (CI), and p values (Pval). The numbers above represent the sample size for each of the models, rounded to the nearest 5. GDM: gestational diabetes. IMD: Index of Multiple Deprivation. SGA: Small for Gestational Age. LGA: Large for Gestational Age. Emergency Caesarean birth was modelled against spontaneous birth. Preterm birth was defined as born between 20 and 37 weeks gestation. SGA and LGA defined using the World Health Organization Fetal Growth charts.
+
+-----
+
+```{r model2_plots2, include = F, eval = F, echo = F, fig.align = 'center', fig.width = 10}
+
+##SGA
+#######
+m1$var <- c("Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable", "Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable")
+m1$var <- factor(m1$var, levels = c("Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable"))
+m1$sig <- ifelse(m1$Pval < 0.001, "***", ifelse(m1$Pval < 0.01, "**", ifelse(m1$Pval < 0.05, "*", "")))
+
+#png("m1gdm.png", units = "in", width = 4, height = 5, res = 300)
+ggplot(m1[-c(1,10,11,20),], aes(x = OR, y = var, color = model)) +
+  geom_vline(xintercept = 1, linetype = 2, alpha = 0.5) +
+  geom_point(shape = 20, position = position_dodge(0.6)) +
+  geom_text(aes(label = sig, color = model), position = position_dodge(1.4), vjust = 0.7) +
+  geom_errorbar(aes(xmin = CI_low, xmax = CI_high), width = 0.4, position = position_dodge(0.6)) +
+  scale_color_manual(values = c("#ad54d6", "black")) +
+  labs(y = "", x = "Odds Ratio") + theme_bw() + scale_y_discrete(limits=rev) + guides(color="none")
+dev.off()
+
+##LGA
+#######
+m2$var <- c("Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable", "Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable")
+m2$var <- factor(m2$var, levels = c("Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable"))
+m2$sig <- ifelse(m2$Pval < 0.001, "***", ifelse(m2$Pval < 0.01, "**", ifelse(m2$Pval < 0.05, "*", "")))
+
+#png("m2gdm.png", units = "in", width = 4, height = 5, res = 300)
+ggplot(m2[-c(1,10,11,20),], aes(x = OR, y = var, color = model)) +
+  geom_vline(xintercept = 1, linetype = 2, alpha = 0.5) +
+  geom_point(shape = 20, position = position_dodge(0.6)) +
+  geom_text(aes(label = sig, color = model), position = position_dodge(1.4), vjust = 0.7) +
+  geom_errorbar(mapping = aes(xmin = CI_low, xmax = CI_high), width = 0.4, position = position_dodge(0.6)) +
+  scale_color_manual(values = c("#ad54d6", "black")) +
+  labs(y = "", x = "Odds Ratio") + theme_bw() + scale_y_discrete(limits=rev) + guides(color="none")
+dev.off()
+
+##Preterm
+###########
+m3$var <- c("Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable", "Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable")
+m3$var <- factor(m3$var, levels = c("Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable"))
+m3$sig <- ifelse(m3$Pval < 0.001, "***", ifelse(m3$Pval < 0.01, "**", ifelse(m3$Pval < 0.05, "*", "")))
+
+#png("m3gdm.png", units = "in", width = 4, height = 5, res = 300)
+ggplot(m3[-c(1,10,11,20),], aes(x = OR, y = var, color = model)) +
+  geom_vline(xintercept = 1, linetype = 2, alpha = 0.5) +
+  geom_point(shape = 20, position = position_dodge(0.6)) +
+  geom_text(aes(label = sig, color = model), position = position_dodge(1.4), vjust = 0.7) +
+  geom_errorbar(mapping = aes(xmin = CI_low, xmax = CI_high), width = 0.4, position = position_dodge(0.6)) +
+  scale_color_manual(values = c("#ad54d6", "black")) +
+  labs(y = "", x = "Odds Ratio") + theme_bw() + scale_y_discrete(limits=rev) + guides(color="none")
+dev.off()
+
+##Emergency Csection
+######################
+m4$var <- c("Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable", "Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable")
+m4$var <- factor(m4$var, levels = c("Int", "Birth Date", "Maternal Age", "Low", "High", "Asian", "Black", "Mixed", "Other", "Unavailable"))
+m4$sig <- ifelse(m4$Pval < 0.001, "***", ifelse(m4$Pval < 0.01, "**", ifelse(m4$Pval < 0.05, "*", "")))
+
+#png("m4gdm.png", units = "in", width = 4, height = 5, res = 300)
+ggplot(m4[-c(1,10,11,20),], aes(x = OR, y = var, color = model)) +
+  geom_vline(xintercept = 1, linetype = 2, alpha = 0.5) +
+  geom_point(shape = 20, position = position_dodge(0.6)) +
+  geom_text(aes(label = sig, color = model), position = position_dodge(1.4), vjust = 0.7) +
+  geom_errorbar(mapping = aes(xmin = CI_low, xmax = CI_high), width = 0.4, position = position_dodge(0.6)) +
+  scale_color_manual(values = c("#ad54d6", "black")) +
+  labs(y = "", x = "Odds Ratio") + theme_bw() + scale_y_discrete(limits=rev) + guides(color="none")
+dev.off()
+
+```
+
+The figures present the odds ratios from logistic regression of emergency small for gestational age (SGA) infant, large for gestational age (LGA) infant, preterm birth and emergency caesarean delivery, modelled separately for individuals with a gestational diabetes (GDM) diagnosis (purple) and without any diabetes diagnosis (black). Emergency Caesarean birth was modelled against spontaneous birth. Preterm birth was defined as born between 20 and 37 weeks gestation. SGA and LGA defined using the World Health Organization Fetal Growth charts. The 95% confidence intervals are depicted as horizontal lines. Statistical significance is represented as * (p < 0.05), ** (p < 0.01), and *** (p < 0.001).
+

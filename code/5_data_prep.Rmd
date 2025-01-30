@@ -1,0 +1,242 @@
+---
+title: "CCU064 Data Merging (All Births Included)"
+author: "CSS"
+date: '2024-07-01'
+output:
+  html_document: default
+  pdf_document: default
+---
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r input, include = F, eval = T}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+options(scipen = 999)
+
+library(odbc)
+library(DBI)
+library(dplyr)
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+library(kableExtra)
+library(gridExtra)
+library(scales)
+#library(seasonal)
+library(RColorBrewer)
+setwd("~/collab/CCU064/2_main_analysis")
+
+##Merging everything together
+###############################
+
+##Load up the cohort.
+cohort <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/cohort_DB2.Rds")
+
+##Filter from 2018 to 2023 dates.
+cohort <- cohort[cohort$deldate >= "2018-01-01" & cohort$deldate < "2023-01-01", ]
+moms <- unique(cohort$PERSON_ID_HESAPC)
+
+##Removing weird cases where pregstart > deldate.
+cohort[which(cohort$pregstart >= cohort$deldate), "pregstart"] <- NA
+
+##Removing GA and pregstart for unrealistic gestation lengths.
+dum <- cohort[which(cohort$GESTAT_1 >= 43 | cohort$deldate - cohort$pregstart > 300), ]
+cohort[which(cohort$GESTAT_1 >= 43), "GESTAT_1"] <- NA
+cohort[which(cohort$deldate - cohort$pregstart > 300), "pregstart"] <- NA
+
+##Turning LSOA into deprivation for 2019.
+imd <- dbGetQuery(con, "SELECT * FROM dss_corporate.english_indices_of_dep_v02
+                  WHERE IMD_YEAR = 2019")
+names(imd)[3] <- "LSOA11"
+cohort <- merge(cohort, imd[, c("LSOA11", "DECI_IMD")], by = "LSOA11", all.x = T)
+cohort$DECI_IMD <- as.integer(cohort$DECI_IMD)
+
+##Merging GDPPR ethnicity.
+ethnos <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/gdppr_ethno.Rds") ##50% empty, not good.
+names(ethnos)[1] <- "PERSON_ID_HESAPC"
+cohort <- merge(cohort, ethnos[, c(1,2)], by = "PERSON_ID_HESAPC", all.x = T)
+cohort$cmb_ETHNOS <- gsub("\\s+|^$", NA, cohort$ETHNIC) ##Turning blank spaces into NA.
+cohort[is.na(cohort$cmb_ETHNOS), "cmb_ETHNOS"] <- cohort[is.na(cohort$cmb_ETHNOS), "ETHNOS"] ##Using GDPPR when available.
+#prop.table(table(cohort$cmb_ETHNOS, useNA = "always"))*100
+
+##Categorising ethnicity from HES codes.
+ethnos <- read.csv("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/SDE_ethnicity_codes.txt", header = F)
+names(ethnos)[1] <- "cmb_ETHNOS"
+names(ethnos)[2] <- "ethnicity"
+cohort <- merge(cohort, ethnos, by = "cmb_ETHNOS", all.x = T)
+#prop.table(table(cohort$ethnicity, useNA = "always"))*100
+
+
+##Rename and remove useless columns.
+cohort$loss <- grepl("loss", cohort$episode, ignore.case = T)
+cohort[which(cohort$outcome == "Stillbirth"), "loss"] <- T
+table(cohort$loss, cohort$outcome)
+cohort <- subset(cohort, select = -c(ETHNOS, ETHNIC, cmb_ETHNOS, LSOA11, episode, singleton))
+names(cohort)[c(1:8,23)] <- c("mom_ID", "epidate", "age", "antedate", "del_GA", "sex", "BW", "del_method", "IMD")
+
+##Sub-cohort definition.
+cohort$covid <- NA
+cohort[which(cohort$deldate < "2020-10-14"), "covid"] <- "pre" ##Only women delivering after mid October would have been screened for GDM at antenatal appointment.
+cohort[which(cohort$deldate >= "2020-10-14"), "covid"] <- "post"
+cohort$covid <- factor(cohort$covid, levels = c("pre", "post"))
+
+##Add BMI info from MSDS.
+m_BMI <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/BMI_MSDS.Rds")
+m_BMI$preg_ID_BMI <- m_BMI$UniqPregID
+m_BMI$mom_ID <- m_BMI$PERSON_ID_HESAPC
+m_BMI <- m_BMI[!is.na(m_BMI$UniqPregID),]
+
+m_BMI <- m_BMI[order(m_BMI$BMI_date),]
+m_BMI <- m_BMI[!duplicated(m_BMI$preg_ID_BMI), ] ##1st observation per pregnancy
+
+dum <- left_join(cohort, m_BMI[, c(-1,-2)], by = "mom_ID") %>%
+  mutate(date_diff = as.integer(difftime(deldate, BMI_date, units = c("days")))) ##Merge with cohort.
+
+noBMI <- dum[is.na(dum$preg_ID_BMI), ]
+yesBMI <- dum[!is.na(dum$preg_ID_BMI), ]
+
+##Removing observations after 20 weeks gestation, also removing those after delivery.
+yesBMI[which(yesBMI$date_diff < 140), c("BMI_MSDS", "BMI_date", "date_diff")] <- c(NA, NA, NA)
+##Removing observations over 300 days before delivery date, also prior delivery.
+yesBMI[which(yesBMI$date_diff > 300), c("BMI_MSDS", "BMI_date", "date_diff")] <- c(NA, NA, NA)
+
+##Removing duplicates when there's multiple minimum date_diff, keeping unique pregnancy.
+yesBMI <- yesBMI[order(yesBMI$mom_ID, yesBMI$deldate, -yesBMI$date_diff), ]
+yesBMI2 <- yesBMI[!duplicated(yesBMI[,c("mom_ID", "deldate")]), ]
+
+dum <- rbind(noBMI,yesBMI2) ##Merging back into cohort.
+
+##Sanity check.
+#table(duplicated(cohort$mom_ID))
+#colSums(is.na(cohort))/nrow(cohort)*100
+#table(duplicated(dum$mom_ID))
+#table(duplicated(dum$preg_ID_BMI))
+#colSums(is.na(dum))/nrow(dum)*100
+cohort <- dum
+
+
+##Adding baby demo from MSDS.
+bb <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/baby_MSDS.Rds")
+bb <- bb[!is.na(bb$mom_ID_bbcare) | !is.na(bb$mom_ID_bbdemo),]
+##Different m_IDs between baby activities and baby demo
+bb$mom_ID <- bb$mom_ID_bbdemo
+bb[is.na(bb$mom_ID), "mom_ID"] <- bb[is.na(bb$mom_ID), "mom_ID_bbcare"] ##Filling mom IDs.
+bb$flag <- bb$mom_ID_bbcare == bb$mom_ID_bbdemo
+bb <- bb[-which(!is.na(bb$mom_ID_bbcare) & !is.na(bb$mom_ID_bbdemo) & bb$flag == F), ]
+
+prop.table(table(unique(cohort$mom_ID) %in% unique(bb$mom_ID)))*100
+round(colMeans(is.na(bb))*100,2)
+
+bb[is.na(bb$preg_ID_bbdemo), "preg_ID_bbdemo"] <- bb[is.na(bb$preg_ID_bbdemo), "preg_ID_bbcare"] ##Filling preg IDs.
+bb$date <- bb$DOB
+bb[is.na(bb$DOB), "date"] <- bb[is.na(bb$DOB), "BW_date"] ##Filling ordering date.
+bb <- bb[order(bb$date),]
+#dupes <- bb[bb$preg_ID_bbdemo %in% bb[duplicated(bb$preg_ID_bbdemo), "preg_ID_bbdemo"],]
+
+dat <- bb %>% group_by(preg_ID_bbdemo) %>% summarise(order = mean(abs(as.numeric(birthordermaternitysus)), na.rm = T)) ##Using birth order to identify multiple births.
+dat[which(dat$order > 6), "order"] <- NA
+dat$singleton_MSDS <- F
+dat[which(dat$order == 1), "singleton_MSDS"] <- T
+dat[is.na(dat$order), "singleton_MSDS"] <- NA
+
+bb <- merge(bb, dat[,c(1,3)], by = "preg_ID_bbdemo", all.x = T)
+bb <- bb[!duplicated(bb$preg_ID_bbdemo), ] ##1st observation (baby?) per pregnancy.
+
+names(bb)[c(2,7,9,10,18)] <- c("baby_ID", "outcome_MSDS", "GA_MSDS", "del_method_MSDS", "BW_MSDS")
+dum <- left_join(cohort, bb[, c(1,2,7,9,10,18,19,21,22)], by = "mom_ID") %>%
+  mutate(date_diff = as.integer(difftime(deldate, date, units = c("days")))) ##Merge with cohort.
+
+nobb <- dum[is.na(dum$baby_ID), ]
+yesbb <- dum[!is.na(dum$baby_ID), ]
+
+##Removing observations 30 days prior or after the delivery to select correct observation.
+yesbb[which(yesbb$date_diff < -30 | yesbb$date_diff > 30), c("baby_ID", "outcome_MSDS", "GA_MSDS", "del_method_MSDS", "BW_MSDS", "singleton_MSDS", "date_diff")] <- c(NA, NA, NA, NA, NA, NA, NA)
+
+##Removing duplicates when there's multiple minimum date_diff, keeping single baby/observation.
+yesbb <- yesbb[order(yesbb$mom_ID, yesbb$deldate, abs(yesbb$date_diff)), ]
+yesbb2 <- yesbb[!duplicated(yesbb[,c("mom_ID", "deldate")]), ]
+
+dum <- rbind(nobb,yesbb2) ##Merging back into cohort.
+
+##Sanity check.
+#table(duplicated(cohort$mom_ID))
+#colSums(is.na(cohort))/nrow(cohort)*100
+#table(duplicated(dum$mom_ID))
+#table(duplicated(dum$preg_ID_bbdemo))
+#colSums(is.na(dum))/nrow(dum)*100
+cohort <- dum
+rm(imd, ethnos, dum, m_BMI, noBMI, yesBMI, yesBMI2, dupes, bb, yesbb, nobb, yesbb2, dat)
+
+
+##Using MSDS to complete variables.
+cohort[is.na(cohort$BW), "BW"] <- cohort[is.na(cohort$BW), "BW_MSDS"]
+cohort[which(as.numeric(cohort$outcome_MSDS) %in% c(2:5)), "loss"] <- T
+cohort[is.na(cohort$del_method), "del_method"] <- cohort[is.na(cohort$del_method), "del_method_MSDS"]
+cohort[which(cohort$GA_MSDS < 10), "GA_MSDS"] <- NA
+cohort$GA_MSDS <- cohort$GA_MSDS/7
+cohort[which(cohort$GA_MSDS >= 43), "GA_MSDS"] <- NA
+cohort[is.na(cohort$del_GA), "del_GA"] <- cohort[is.na(cohort$del_GA), "GA_MSDS"]
+cohort$pregstart <- cohort$deldate - (cohort$del_GA * 7)
+cohort[is.na(cohort$pregstart), "pregstart"] <- cohort[is.na(cohort$pregstart), "antedate"]
+
+cohort <- subset(cohort, select = -c(BW_MSDS, outcome_MSDS, singleton_MSDS, del_method_MSDS, GA_MSDS, date, date_diff))
+
+##Categorisation and cleaning
+###############################
+
+##Categorising IMD.
+cohort$IMD_cat <- "Average"
+cohort[which(cohort$IMD <= 2), "IMD_cat"] <- "High"
+cohort[which(cohort$IMD >= 9), "IMD_cat"] <- "Low"
+cohort[is.na(cohort$IMD), "IMD_cat"] <- NA
+cohort$IMD_cat <- factor(cohort$IMD_cat, levels = c("Average", "Low", "High"))
+
+##Categorising delivery method.
+cohort$del_method2 <- NA
+cohort[cohort$del_method %in% c(0,1), "del_method2"] <- "Spontaneous"
+cohort[cohort$del_method %in% c(2,3,4,9), "del_method2"] <- "Instrumental"
+cohort[cohort$del_method %in% c(5,6), "del_method2"] <- "Breech"
+cohort[cohort$del_method %in% c(7), "del_method2"] <- "Elective Cesarean"
+cohort[cohort$del_method %in% c(8), "del_method2"] <- "Emergency Cesarean"
+table(cohort$del_method, cohort$del_method2)
+
+##Collapsing ethnicities, based on Census 2021.
+cohort$ethnos <- cohort$ethnicity
+cohort[grep("white|gypsy|roma", cohort$ethnicity, ignore.case = T), "ethnos"] <- "White Background"
+cohort[grep("asian|chinese", cohort$ethnicity, ignore.case = T) , "ethnos"] <- "Asian Background"
+cohort[grep("black|caribbean", cohort$ethnicity, ignore.case = T), "ethnos"] <- "Black Background"
+cohort[grep("mixed", cohort$ethnicity, ignore.case = T), "ethnos"] <- "Mixed Background"
+cohort[grep("known|stated", cohort$ethnicity, ignore.case = T), "ethnos"] <- "Unavailable"
+cohort[grep("other ethnic|arab", cohort$ethnicity, ignore.case = T), "ethnos"] <- "Other Background"
+#table(cohort$ethnicity, cohort$ethnos)
+
+##Even more collapsed.
+cohort$ethnos2 <- cohort$ethnos
+cohort[grep("asian|black|mixed|other", cohort$ethnos, ignore.case = T), "ethnos2"] <- "Non White Background"
+cohort$ethnos2 <- factor(cohort$ethnos2, levels = c("White Background", "Non White Background", "Unavailable"))
+
+##Categorising pre-term.
+cohort$preterm <- NA
+cohort[which(cohort$del_GA < 37 & cohort$del_GA >= 20), "preterm"] <- T
+cohort[which(cohort$del_GA >= 37), "preterm"] <- F
+
+##Categorising BMI.
+cohort$BMI_cat <- NA
+cohort[which(cohort$BMI_MSDS < 18.5), "BMI_cat"] <- "Underweight"
+cohort[which(cohort$BMI_MSDS >= 18.5), "BMI_cat"] <- "Healthy Weight"
+cohort[which(cohort$BMI_MSDS >= 25), "BMI_cat"] <- "Overweight"
+cohort[which(cohort$BMI_MSDS >= 30), "BMI_cat"] <- "Obese"
+
+round(colMeans(is.na(cohort))*100,2)
+
+pre <- cohort[cohort$covid == "pre", ]
+post <- cohort[cohort$covid == "post", ]
+moms <- unique(cohort$mom_ID)
+
+
+##Saving merged and prepared dataset.
+saveRDS(cohort, file = "/db-mnt/databricks/rstudio_collab/CCU064/2_main_analysis/del_cohort.Rds")
+
+```

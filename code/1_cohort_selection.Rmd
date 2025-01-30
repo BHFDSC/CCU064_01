@@ -1,0 +1,261 @@
+---
+title: "CCU064 Data Selection and Cleaning"
+author: "CSS"
+date: "2023-09-06"
+output: html_document
+---
+
+```{r HES_merging, include=FALSE, eval=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(odbc)
+library(DBI)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+setwd("~//CCU064/1_cohort_selection")
+
+
+##HES Maternity subtable
+##########################
+
+##Useful as additional data to HES APC.
+##Also to accurately define delivery date.
+hesmat <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPIKEY, ANASDATE, ANAGEST, MATAGE, GESTAT_1, ANTEDUR, POSTDUR, BIRSTAT_1, BIRWEIT_1, SEXBABY_1,
+  DELMETH_1, BIRORDR_1, BIRORDR_2, NUMBABY, NUMPREG
+                   FROM dars_nic_391419_j3w9t_collab.hes_apc_mat_all_years_archive
+                   WHERE ARCHIVED_ON = '2024-04-25'
+                    AND MATAGE BETWEEN 16 AND 50
+                    AND MATERNITY_EPISODE_TYPE IN ('1','3')
+                    AND FYEAR IN ('1718','1819','1920','2021','2122','2223')")
+
+length(unique(hesmat$PERSON_ID_DEID))
+length(unique(hesmat$EPIKEY))
+
+##Cleaning ANASDATE before collapsing data to unique EPIKEY.
+hesmat[!is.na(hesmat$ANASDATE) & (hesmat$ANASDATE < "2017-01-01" | hesmat$ANASDATE > "2023-05-01"), "ANASDATE"] <- NA ##Outside FYEARS selected.
+hesmat <- hesmat[!duplicated(hesmat), ] ##Removing any identical dupes.
+table(duplicated(hesmat$EPIKEY))
+
+##Cleaning GESMAT and ANAGEST. 99 means NA.
+##GA limited per HES MAT to 10-49.
+hesmat[which(hesmat$GESTAT_1 == 99), "GESTAT_1"] <- NA
+hesmat[which(hesmat$ANAGEST < 0 | hesmat$ANAGEST > 50), "ANAGEST"] <- NA
+
+
+##HES APC Dataset
+###################
+
+##Selecting only women with ages 16-50 at episode start with filtered admission date.
+hesapc <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPIKEY, EPISTART, EPIEND, ADMIDATE, DISDATE, EPIORDER, ETHNOS,
+STARTAGE, DIAG_4_CONCAT, OPERTN_4_CONCAT, LSOA11
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_all_years_archive
+                  WHERE ARCHIVED_ON = '2024-04-25'
+                    AND FYEAR IN ('1718','1819','1920','2021','2122','2223')
+                    AND STARTAGE BETWEEN 16 AND 50
+                    AND ADMIDATE > '2018-01-01'
+                    AND SEX = '2'
+                    AND (EPITYPE IN ('2','5') OR CLASSPAT = '5')")
+
+length(unique(hesapc$PERSON_ID_DEID)) 
+length(unique(hesapc$EPIKEY))
+
+hesapc <- hesapc[!duplicated(hesapc), ] ##Removing any identical dupes.
+table(duplicated(hesapc$EPIKEY))
+
+##Delivery codelist to filter HES APC.
+delcodes <- rbind(data.frame(),
+      c("del", "ICD10", "O[6-7]|O8[0-4]|Z37|Z38"),
+      c("del", "OPCS4", "P14[1-3]|R1[4-9]|R2|R3[0-2]"),
+      c("loss", "ICD10", "O0[0-8]"),
+      c("loss", "OPCS4", "Q10[1-2]|Q11[1-3]|Q11[5-6]|Q14|R03"),
+      c("care", "ICD10", "O[1-4]|O85|O9|Z321|Z3[3-6]|Z39"),
+      c("care", "OPCS4", "Y95"),
+      c("peri", "ICD10", "P[1-9]"))
+names(delcodes) <- c("type", "scheme", "codes")
+
+ICDall <- paste0(delcodes[delcodes$scheme == "ICD10", ]$codes, collapse = "|")
+OPCSall <- paste0(delcodes[delcodes$scheme == "OPCS4", ]$codes, collapse = "|")
+
+##Remove irrelevant codes.
+hesapc$flag <- F
+hesapc[grep(ICDall, hesapc$DIAG_4_CONCAT, ignore.case = T), "flag"] <- T
+hesapc[grep(OPCSall, hesapc$OPERTN_4_CONCAT, ignore.case = T), "flag"] <- T
+prop.table(table(hesapc$flag))*100 ##% records out.
+hesapc <- hesapc[hesapc$flag == T,]
+hesapc <- subset(hesapc, select = -c(flag))
+
+##Add some context.
+##Awful system but it works.
+hesapc$episode <- NA
+hesapc[grepl(delcodes[delcodes$type == "del" & delcodes$scheme == "ICD10",]$codes, hesapc$DIAG_4_CONCAT, ignore.case = T) |
+         grepl(delcodes[delcodes$type == "del" & delcodes$scheme == "OPCS4",]$codes, hesapc$OPERTN_4_CONCAT, ignore.case = T), "episode"] <- "delivery"
+
+epiNAs <- is.na(hesapc$episode)
+hesapc[epiNAs & (grepl(delcodes[delcodes$type == "care" & delcodes$scheme == "ICD10",]$codes, hesapc$DIAG_4_CONCAT, ignore.case = T) |
+         grepl(delcodes[delcodes$type == "care" & delcodes$scheme == "OPCS4",]$codes, hesapc$OPERTN_4_CONCAT, ignore.case = T)), "episode"] <- "maternal care"
+hesapc[!epiNAs & (grepl(delcodes[delcodes$type == "care" & delcodes$scheme == "ICD10",]$codes, hesapc$DIAG_4_CONCAT, ignore.case = T) |
+         grepl(delcodes[delcodes$type == "care" & delcodes$scheme == "OPCS4",]$codes, hesapc$OPERTN_4_CONCAT, ignore.case = T)), "episode"] <- paste0(hesapc[!epiNAs & (grepl(delcodes[delcodes$type == "care" & delcodes$scheme == "ICD10",]$codes, hesapc$DIAG_4_CONCAT, ignore.case = T) |
+         grepl(delcodes[delcodes$type == "care" & delcodes$scheme == "OPCS4",]$codes, hesapc$OPERTN_4_CONCAT, ignore.case = T)), "episode"], ", maternal care")
+
+epiNAs <- is.na(hesapc$episode)
+hesapc[epiNAs & (grepl(delcodes[delcodes$type == "loss" & delcodes$scheme == "ICD10",]$codes, hesapc$DIAG_4_CONCAT, ignore.case = T) |
+         grepl(delcodes[delcodes$type == "loss" & delcodes$scheme == "OPCS4",]$codes, hesapc$OPERTN_4_CONCAT, ignore.case = T)), "episode"] <- "loss"
+hesapc[!epiNAs & (grepl(delcodes[delcodes$type == "loss" & delcodes$scheme == "ICD10",]$codes, hesapc$DIAG_4_CONCAT, ignore.case = T) |
+         grepl(delcodes[delcodes$type == "loss" & delcodes$scheme == "OPCS4",]$codes, hesapc$OPERTN_4_CONCAT, ignore.case = T)), "episode"] <- paste0(hesapc[!epiNAs & (grepl(delcodes[delcodes$type == "loss" & delcodes$scheme == "ICD10",]$codes, hesapc$DIAG_4_CONCAT, ignore.case = T) |
+         grepl(delcodes[delcodes$type == "loss" & delcodes$scheme == "OPCS4",]$codes, hesapc$OPERTN_4_CONCAT, ignore.case = T)), "episode"], ", loss")
+
+hesapc[grep(delcodes[delcodes$type == "peri" & delcodes$scheme == "ICD10",]$codes, hesapc$DIAG_4_CONCAT, ignore.case = T), "episode"] <- paste0(hesapc[grep(delcodes[delcodes$type == "peri" & delcodes$scheme == "ICD10",]$codes, hesapc$DIAG_4_CONCAT, ignore.case = T), "episode"] , ", perinatal care")
+
+
+##Time to merge
+#################
+
+sum(hesmat$EPIKEY %in% hesapc$EPIKEY)/nrow(hesmat)*100
+names(hesmat)[1] <- "PERSON_ID_HESMAT"
+names(hesapc)[1] <- "PERSON_ID_HESAPC"
+hes <- merge(hesapc, hesmat, by = "EPIKEY", all.x = T)
+round(colMeans(is.na(hes))*100,2)
+
+##Remove any instances of different PERSON_ID in the same record.
+hes <- hes[!is.na(hes$PERSON_ID_HESAPC), ]
+dum <- hes[!is.na(hes$PERSON_ID_HESMAT), ] ##Removing NAs from comparisons.
+flag <- dum[dum$PERSON_ID_HESAPC != dum$PERSON_ID_HESMAT, "EPIKEY"]
+hes <- hes[!hes$EPIKEY %in% flag, ]
+rm(hesapc,hesmat,delcodes,dum,flag,aaa)
+
+#saveRDS(hes, file = "~//CCU064/1_cohort_selection/merged_hes.Rds")
+
+```
+
+```{r HES_filtering, include=FALSE, eval=FALSE}
+
+mat <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/merged_hes.Rds")
+
+##Episode filtering and collapsing
+####################################
+
+##The goal is to collapse all this data into a single pregnancy/delivery event.
+##Needs to extract relevant information, deal with missingness, and deal with subsequent pregnancies.
+##1) Identify delivery date using EPISTART + ANTEDUR, or EPIEND - POSTDUR.
+mat$deldate_1 <- mat$EPISTART + mat$ANTEDUR
+mat$deldate_2 <- mat$EPIEND - mat$POSTDUR
+prop.table(table("del1" = is.na(mat$deldate_1), "del2" = is.na(mat$deldate_2)))*100
+summary(as.double(difftime(mat$deldate_1, mat$deldate_2, units = "days")))
+##Using deldate_1 as base, fill few NAs with deldate_2.
+##If no MAT info available, use EPISTART as provisional deldate.
+mat$deldate <- mat$deldate_1
+mat[is.na(mat$deldate), "deldate"] <- mat[is.na(mat$deldate), "deldate_2"]
+mat[is.na(mat$deldate), "deldate"] <- mat[is.na(mat$deldate), "EPISTART"]
+hist(mat$deldate, breaks = 40, main = "Histogram of Delivery Date (prov)")
+mat <- subset(mat, select = -c(deldate_1, deldate_2))
+
+
+##2) Need delivery + GA to determine pregnancy start.
+##Create provisional pregnancy start using ANASDATE if no GA available.
+mat$pregstart <- mat$deldate - (mat$GESTAT_1 * 7)
+mat[is.na(mat$pregstart), "pregstart"] <- mat[is.na(mat$pregstart), "ANASDATE"]
+summary(mat$pregstart)
+hist(mat$pregstart, breaks = 40, col=rgb(1,0,0,0.5), main = "Pregnancy (red) vs. Delivery (blue) dates")
+hist(mat$deldate, breaks = 40, col=rgb(0,0,1,0.5), add = T)
+
+
+##3) Cleaning BW, birth outcome, sex, parity, delivery method, and "singleton birth".
+mat[which(mat$BIRWEIT_1 < 500 | mat$BIRWEIT_1 > 7000), "BIRWEIT_1"] <- NA
+mat$outcome <- "Live Birth"
+mat[mat$BIRSTAT_1 %in% c(2,3,4), "outcome"] <- "Stillbirth"
+mat[mat$BIRSTAT_1 %in% c(9), "outcome"] <- NA
+mat[mat$SEXBABY_1 %in% c(0,9), "SEXBABY_1"] <- NA
+mat[which(mat$SEXBABY_1 == 1), "SEXBABY_1"] <- "Male"
+mat[which(mat$SEXBABY_1 == 2), "SEXBABY_1"] <- "Female"
+mat$singleton <- T
+mat[mat$BIRORDR_1 %in% c(2:8) | mat$BIRORDR_2 %in% c(1:8), "singleton"] <- F ##If not additional orders, the birth is singleton by default.
+mat[mat$NUMBABY %in% c(2:8), "singleton"] <- F
+mat[which(mat$NUMBABY == 1), "singleton"] <- T
+mat$n_baby <- as.numeric(mat$NUMBABY)
+mat[which(mat$n_baby == 9), "n_baby"] <- NA ##9 as indicator of NA.
+table(mat$singleton, mat$n_baby)
+mat$parity <- as.numeric(mat$NUMPREG)
+mat[which(mat$parity == 99), "parity"] <- NA
+mat <- subset(mat, select = -c(BIRSTAT_1, BIRORDR_1, BIRORDR_2, NUMBABY, NUMPREG))
+
+
+##4) Figuring out how to deal with multiple episodes for the same individual, collapsing same pregnancy and differentiating subsequent.
+##Selecting only deliveries or losses, like CCU018.
+prop.table(table(mat$episode))*100
+dels <- mat[grepl("delivery|loss", mat$episode), ]
+prop.table(table(dels$episode))*100
+
+##Ordering dataset by ID and EPISTART.
+dels <- dels[order(dels$PERSON_ID_HESAPC, dels$EPISTART, dels$EPIKEY), ]
+dels$rownum <- 1:nrow(dels)
+##Difference between consecutive EPISTART by ID.
+dels$datediff <- NA
+dels[-nrow(dels), "datediff"] <- as.numeric(difftime(dels[-1, "EPISTART"], dels[-nrow(dels), "EPISTART"], units = c("days")))
+summary(dels$datediff)
+##This gets the last episode by ID, to remove datediff and hopefully allows to differentiate subsequent pregnancies.
+last_ep <- dels %>% group_by(PERSON_ID_HESAPC) %>% summarise("last" = max(rownum))
+dels[dels$rownum %in% last_ep$last, "datediff"] <- NA
+summary(dels$datediff)
+hist(dels[dels$datediff !=0, "datediff"]/30, breaks = 50, main = "Difference in Episode Dates per Individual", xlab = "Date Difference (months)", freq = T) ##Same day not plotted!
+ggplot(dels[dels$datediff<90 & dels$datediff !=0,], aes(x = datediff)) + geom_freqpoly(bins=80) + xlab("Difference in Days") ##Episodes within 3 months.
+ggplot(dels[dels$datediff<365 & dels$datediff !=0,], aes(x = datediff/30)) + geom_freqpoly(bins=80) + xlab("Difference in Months") ##Episodes within 1 year.
+
+prop.table(table(is.na(dels$deldate)))*100
+prop.table(table(dels$diabetes,  useNA = "always"))*100
+prop.table(table(dels$episode, useNA = "always"))*100
+hist(dels$pregstart, breaks = 40, col=rgb(1,0,0,0.5), xlab = "Year", main = "Pregnancy (red) vs. Delivery (blue) dates", freq = T, ylim = c(0,82000))
+hist(dels$deldate, breaks = 40, col=rgb(0,0,1,0.5), freq = T, ylim = c(0,82000), add = T)
+rm(last_ep)
+
+
+##5) Collapsing same day deliveries into a single event.
+##Flagging both entries between 7 days and 6 months apart for removal later (after clustering).
+dels$flag <- FALSE
+dels[unique(c(which(dels$datediff > 7 & dels$datediff < 180), which(dels$datediff > 7 & dels$datediff < 180)+1)), "flag"] <- TRUE
+table(dels$flag)
+
+##Getting list of all mothers, mothers with a single delivery recorded, and those with multiple deliveries.
+moms <- unique(dels$PERSON_ID_HESAPC)
+dupemoms <- unique(dels[duplicated(dels$PERSON_ID_HESAPC), "PERSON_ID_HESAPC"])
+onebbmoms <- dels[!(duplicated(dels$PERSON_ID_HESAPC)|duplicated(dels$PERSON_ID_HESAPC, fromLast=TRUE)), "PERSON_ID_HESAPC"]
+
+##Start selection process by taking info from women only appearing once.
+vars <- c("PERSON_ID_HESAPC", "EPISTART", "ETHNOS", "LSOA11", "STARTAGE", "episode", "ANASDATE", "GESTAT_1", "SEXBABY_1", "BIRWEIT_1", "DELMETH_1", "n_baby", "parity",
+          "deldate", "pregstart", "outcome", "singleton", "flag", "rownum")
+newdat <- dels[dels$PERSON_ID_HESAPC %in% onebbmoms, vars]
+newdat$cluster <- 1 ##Single birth episodes, 1st cluster.
+
+##Missigness to select most complete entry.
+dels$missMAT <- apply(is.na(dels[, c("ANASDATE", "GESTAT_1", "BIRWEIT_1", "DELMETH_1", "ANTEDUR", "POSTDUR")]), MARGIN = 1, FUN = sum)
+dels$missPREG <- 0
+dels[is.na(dels$pregstart), "missPREG"] <- 1
+
+##Now collapse data based on the time between episodes.
+dum <- dels[dels$PERSON_ID_HESAPC %in% dupemoms, c(vars, "missMAT", "missPREG")]
+dat <- dum %>% group_by(PERSON_ID_HESAPC) %>%
+  mutate(cluster = 1 + cumsum(c(0, diff(EPISTART) > 7))) %>%
+  ungroup() ##Get cluster by ID and episode date, to distinguish between episode groups.
+
+dat2 <- dat %>% group_by(PERSON_ID_HESAPC, cluster) %>% mutate(flagged = any(flag)) %>% ungroup() ##Clusters with flagged entries.
+out <- dat2[dat2$flagged == T, ]$rownum ##Keeping them for later removal.
+day7 <- dat %>% group_by(PERSON_ID_HESAPC, cluster) %>%
+   arrange(missPREG, missMAT, EPISTART, .by_group = T) %>%
+   slice(1L) ##Take the most complete from each cluster and ID.
+
+
+round(prop.table(table(day7$cluster))*100,3) ##Clusters per individual.
+
+newdat <- rbind(newdat, day7[, c(vars, "cluster")]) ##Merging all entries together.
+newdat <- newdat[!newdat$rownum %in% out, ]
+
+##Number of individual women categorised should match the previous subsets - removed episodes.
+length(unique(newdat$PERSON_ID_HESAPC))
+length(onebbmoms) + length(dupemoms)
+rm(dum,dat,dat2,day7,out,vars,onebbmoms,dupemoms,moms)
+
+##Progress save!
+newdat <- subset(newdat, select = -c(flag, rownum))
+saveRDS(newdat, file = "~/rstudio_collab/CCU064/1_cohort_selection/clean_hes.Rds")
+
+```

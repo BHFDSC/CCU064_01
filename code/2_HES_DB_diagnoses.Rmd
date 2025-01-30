@@ -1,0 +1,460 @@
+---
+title: "CCU064 Diabetes Data Incorporation"
+author: "CSS"
+date: "2023-11-23"
+output: html_document
+---
+
+```{r c1, include=FALSE, eval=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(odbc)
+library(DBI)
+library(dplyr)
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+setwd("~/rstudio_collab/CCU064/1_cohort_selection")
+
+##Load up the cohort.
+newdat <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/clean_hes.Rds")
+moms <- unique(newdat$PERSON_ID_HESAPC) ##IDs to filter datasets.
+
+```
+
+```{r hes_read, include=FALSE, eval=FALSE}
+
+##Bringing in HES data.
+##Load them one by one to prevent crashes and better control progress.#
+##Awful way but couldn't find a better one within R. Just needs to be run once.
+
+hes9798 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_9798_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_9798_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes9798 <- hes9798[!duplicated(hes9798),]
+hes9798 <- hes9798[hes9798$PERSON_ID_DEID %in% moms, ]
+hes9798$fyear <- "9798"
+
+hes9899 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_9899_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_9899_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes9899 <- hes9899[!duplicated(hes9899),]
+hes9899 <- hes9899[hes9899$PERSON_ID_DEID %in% moms, ]
+hes9899$fyear <- "9899"
+hes_diags <- rbind(hes9798, hes9899)
+rm(hes9798, hes9899)
+
+hes9900 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_9900_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_9900_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes9900 <- hes9900[!duplicated(hes9900),]
+hes9900 <- hes9900[hes9900$PERSON_ID_DEID %in% moms, ]
+hes9900$fyear <- "9900"
+hes_diags <- rbind(hes_diags, hes9900)
+rm(hes9900)
+
+hes0001 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0001_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0001_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0001 <- hes0001[!duplicated(hes0001),]
+hes0001 <- hes0001[hes0001$PERSON_ID_DEID %in% moms, ] 
+hes0001$fyear <- "0001"
+hes_diags <- rbind(hes_diags, hes0001)
+rm(hes0001)
+
+hes0102 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0102_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0102_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0102 <- hes0102[!duplicated(hes0102),]
+hes0102 <- hes0102[hes0102$PERSON_ID_DEID %in% moms, ] 
+hes0102$fyear <- "0102"
+hes_diags <- rbind(hes_diags, hes0102)
+rm(hes0102)
+
+hes0203 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0203_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0203_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0203 <- hes0203[!duplicated(hes0203),]
+hes0203 <- hes0203[hes0203$PERSON_ID_DEID %in% moms, ]
+hes0203$fyear <- "0203"
+hes_diags <- rbind(hes_diags, hes0203)
+rm(hes0203)
+
+hes0304 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0304_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0304_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0304 <- hes0304[!duplicated(hes0304),]
+hes0304 <- hes0304[hes0304$PERSON_ID_DEID %in% moms, ] 
+hes0304$fyear <- "0304"
+hes_diags <- rbind(hes_diags, hes0304)
+rm(hes0304)
+
+hes0405 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0405_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0405_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0405 <- hes0405[!duplicated(hes0405),]
+hes0405 <- hes0405[hes0405$PERSON_ID_DEID %in% moms, ] 
+hes0405$fyear <- "0405"
+hes_diags <- rbind(hes_diags, hes0405)
+rm(hes0405)
+
+hes0506 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0506_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0506_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0506 <- hes0506[!duplicated(hes0506),]
+hes0506 <- hes0506[hes0506$PERSON_ID_DEID %in% moms, ]
+hes0506$fyear <- "0506"
+hes_diags <- rbind(hes_diags, hes0506)
+rm(hes0506)
+
+hes0607 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0607_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0607_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0607 <- hes0607[!duplicated(hes0607),]
+hes0607 <- hes0607[hes0607$PERSON_ID_DEID %in% moms, ]
+hes0607$fyear <- "0607"
+hes_diags <- rbind(hes_diags, hes0607)
+rm(hes0607)
+
+hes0708 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0708_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0708_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0708 <- hes0708[!duplicated(hes0708),]
+hes0708 <- hes0708[hes0708$PERSON_ID_DEID %in% moms, ]
+hes0708$fyear <- "0708"
+hes_diags <- rbind(hes_diags, hes0708)
+rm(hes0708)
+
+hes0809 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0809_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0809_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0809 <- hes0809[!duplicated(hes0809),]
+hes0809 <- hes0809[hes0809$PERSON_ID_DEID %in% moms, ] 
+hes0809$fyear <- "0809"
+hes_diags <- rbind(hes_diags, hes0809)
+rm(hes0809)
+
+hes0910 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_0910_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_0910_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes0910 <- hes0910[!duplicated(hes0910),]
+hes0910 <- hes0910[hes0910$PERSON_ID_DEID %in% moms, ] 
+hes0910$fyear <- "0910"
+hes_diags <- rbind(hes_diags, hes0910)
+rm(hes0910)
+
+hes1011 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1011_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1011_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1011 <- hes1011[!duplicated(hes1011),]
+hes1011 <- hes1011[hes1011$PERSON_ID_DEID %in% moms, ]
+hes1011$fyear <- "1011"
+hes_diags <- rbind(hes_diags, hes1011)
+rm(hes1011)
+
+hes1112 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1112_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1112_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1112 <- hes1112[!duplicated(hes1112),]
+hes1112 <- hes1112[hes1112$PERSON_ID_DEID %in% moms, ]
+hes1112$fyear <- "1112"
+hes_diags <- rbind(hes_diags, hes1112)
+rm(hes1112)
+
+hes1213 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1213_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1213_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1213 <- hes1213[!duplicated(hes1213),]
+hes1213 <- hes1213[hes1213$PERSON_ID_DEID %in% moms, ]
+hes1213$fyear <- "1213"
+hes_diags <- rbind(hes_diags, hes1213)
+rm(hes1213)
+
+hes1314 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1314_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1314_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1314 <- hes1314[!duplicated(hes1314),]
+hes1314 <- hes1314[hes1314$PERSON_ID_DEID %in% moms, ]
+hes1314$fyear <- "1314"
+hes_diags <- rbind(hes_diags, hes1314)
+rm(hes1314)
+
+hes1415 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1415_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1415_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1415 <- hes1415[!duplicated(hes1415),]
+hes1415 <- hes1415[hes1415$PERSON_ID_DEID %in% moms, ]
+hes1415$fyear <- "1415"
+hes_diags <- rbind(hes_diags, hes1415)
+rm(hes1415)
+
+hes1516 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1516_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1516_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1516 <- hes1516[!duplicated(hes1516),]
+hes1516 <- hes1516[hes1516$PERSON_ID_DEID %in% moms, ]
+hes1516$fyear <- "1516"
+hes_diags <- rbind(hes_diags, hes1516)
+rm(hes1516)
+
+hes1617 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1617_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1617_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1617 <- hes1617[!duplicated(hes1617),]
+hes1617 <- hes1617[hes1617$PERSON_ID_DEID %in% moms, ]
+hes1617$fyear <- "1617"
+hes_diags <- rbind(hes_diags, hes1617)
+rm(hes1617)
+
+hes1718 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1718_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1718_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1718 <- hes1718[!duplicated(hes1718),]
+hes1718 <- hes1718[hes1718$PERSON_ID_DEID %in% moms, ]
+hes1718$fyear <- "1718"
+hes_diags <- rbind(hes_diags, hes1718)
+rm(hes1718)
+
+hes1819 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1819_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1819_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1819 <- hes1819[!duplicated(hes1819),]
+hes1819 <- hes1819[hes1819$PERSON_ID_DEID %in% moms, ]
+hes1819$fyear <- "1819"
+hes_diags <- rbind(hes_diags, hes1819)
+rm(hes1819)
+
+hes1920 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_1920_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_1920_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes1920 <- hes1920[!duplicated(hes1920),]
+hes1920 <- hes1920[hes1920$PERSON_ID_DEID %in% moms, ]
+hes1920$fyear <- "1920"
+hes_diags <- rbind(hes_diags, hes1920)
+rm(hes1920)
+
+hes2021 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_2021_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_2021_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes2021 <- hes2021[!duplicated(hes2021),]
+hes2021 <- hes2021[hes2021$PERSON_ID_DEID %in% moms, ]
+hes2021$fyear <- "2021"
+hes_diags <- rbind(hes_diags, hes2021)
+rm(hes2021)
+
+hes2122 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_2122_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_2122_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes2122 <- hes2122[!duplicated(hes2122),]
+hes2122 <- hes2122[hes2122$PERSON_ID_DEID %in% moms, ]
+hes2122$fyear <- "2122"
+hes_diags <- rbind(hes_diags, hes2122)
+rm(hes2122)
+
+hes2223 <- dbGetQuery(con, "SELECT PERSON_ID_DEID, EPISTART, DIAG_4_CONCAT, OPERTN_4_CONCAT
+                  FROM dars_nic_391419_j3w9t_collab.hes_apc_2223_dars_nic_391419_j3w9t_archive
+                  WHERE ARCHIVED_ON = (SELECT MAX(ARCHIVED_ON) FROM dars_nic_391419_j3w9t_collab.hes_apc_2223_dars_nic_391419_j3w9t_archive)
+                    AND SEX = '2'")
+hes2223 <- hes2223[!duplicated(hes2223),]
+hes2223 <- hes2223[hes2223$PERSON_ID_DEID %in% moms, ]
+hes2223$fyear <- "2223"
+hes_diags <- rbind(hes_diags, hes2223)
+rm(hes2223)
+
+
+##Progress save!
+#saveRDS(hes_diags, file = "~/collab/CCU064/1_cohort_selection/hes_diags.Rds")
+ 
+```
+
+```{r hes_db, include=FALSE, eval=FALSE}
+
+##Reading the HES diagnoses again.
+diags <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/hes_diags.Rds")
+
+prop.table(table(diags$fyear, useNA = "always"))*100
+barplot(table(diags$fyear))
+summary(diags$EPISTART)
+
+##Cleaning entries with wrong episode dates.
+diags <- diags[-which(diags$EPISTART < as.Date("1997-01-01")), ]
+summary(diags$EPISTART)
+hist(diags$EPISTART, breaks = 50, freq = T, main = "Histogram of HES Episode Dates")
+
+##Define diabetes codelist.
+##other_DB refers to other types of diabetes from ICD10 codes E1X.
+##other_comb refers to other diabetes-related disorders from different codes.
+dbcodes <- rbind(data.frame(),
+      c("T1D", "ICD", "E10|O240|250[0-9][0,2]"),
+      c("T2D", "ICD", "E11|O241|250[0-9][1,3]"),
+      c("other_DB", "ICD", "E1[2-4]|O24[2-3]|249[0-9]"),
+      c("GDM", "ICD", "O244|6488"),
+      c("neuropathy", "ICD", "G590|G632"),
+      c("cataract/retinopathy", "ICD", "H280|H360"),
+      c("arthropathy", "ICD", "M142"),
+      c("glomerular", "ICD", "N083"),
+      c("other_comb", "ICD", "G590|G632|H280|H360|M142|N083"))
+names(dbcodes) <- c("type", "scheme", "codes")
+
+ICDall <- paste0(dbcodes[dbcodes$scheme == "ICD", ]$codes, collapse = "|")
+
+##Remove irrelevant codes.
+diags$flag <- F
+diags[grep(ICDall, diags$DIAG_4_CONCAT, ignore.case = T), "flag"] <- T
+prop.table(table(diags$flag))*100 ##95.7% out
+diags <- diags[diags$flag == T,]
+diags <- subset(diags, select = -c(flag))
+
+##Individuals in the cohort with a diabetes diagnosis.
+prop.table(table(moms %in% diags$PERSON_ID_DEID))*100
+
+##Add some context. Episode type and GDM flag.
+diags$episode <- NA
+diags[grepl(dbcodes[dbcodes$type == "T2D",]$codes, diags$DIAG_4_CONCAT, ignore.case = T), "episode"] <- "T2D"
+
+epiNAs <- is.na(diags$episode)
+diags[epiNAs & (grepl(dbcodes[dbcodes$type == "T1D",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"] <- "T1D"
+diags[!epiNAs & (grepl(dbcodes[dbcodes$type == "T1D",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"] <- paste0(diags[!epiNAs & (grepl(dbcodes[dbcodes$type == "T1D",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"], ", T1D")
+
+epiNAs <- is.na(diags$episode)
+diags[epiNAs & (grepl(dbcodes[dbcodes$type == "other_DB",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"] <- "other_DB"
+diags[!epiNAs & (grepl(dbcodes[dbcodes$type == "other_DB",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"] <- paste0(diags[!epiNAs & (grepl(dbcodes[dbcodes$type == "other_DB",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"], ", other_DB")
+
+epiNAs <- is.na(diags$episode)
+diags[epiNAs & (grepl(dbcodes[dbcodes$type == "GDM",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"] <- "GDM"
+diags[!epiNAs & (grepl(dbcodes[dbcodes$type == "GDM",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"] <- paste0(diags[!epiNAs & (grepl(dbcodes[dbcodes$type == "GDM",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"], ", GDM")
+
+epiNAs <- is.na(diags$episode)
+diags[epiNAs & (grepl(dbcodes[dbcodes$type == "other_comb",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"] <- "other_comb"
+diags[!epiNAs & (grepl(dbcodes[dbcodes$type == "other_comb",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"] <- paste0(diags[!epiNAs & (grepl(dbcodes[dbcodes$type == "other_comb",]$codes, diags$DIAG_4_CONCAT, ignore.case = T)), "episode"], ", other_comb")
+rm(epiNAs, ICDall, dbcodes)
+
+##Categorising episodes preliminarily.
+table(diags$episode)
+diags$diabetes <- grepl("T2D|T1D|other", diags$episode, ignore.case = T)
+diags$GDM <- grepl("^GDM", diags$episode, ignore.case = T)
+diags$T2D <- grepl("T2D", diags$episode, ignore.case = T)
+diags$T1D <- grepl("T1D", diags$episode, ignore.case = T)
+
+##Getting count of T1D and T2D diagnoses per person, to select accurate diagnosis later.
+t1dd <- diags[diags$T1D == T, "PERSON_ID_DEID"]
+t1dd <- data.frame(table("PERSON_ID_HESAPC" = t1dd))
+names(t1dd)[2] <- "T1D_count"
+
+t2dd <- diags[diags$T2D == T, "PERSON_ID_DEID"]
+t2dd <- data.frame(table("PERSON_ID_HESAPC" = t2dd))
+names(t2dd)[2] <- "T2D_count"
+
+##Removing columns, prepare for merging.
+names(diags)[1] <- "PERSON_ID_HESAPC"
+names(diags)[2] <- "diag_date"
+names(diags)[3] <- "diag_codes"
+diags <- diags[, c("PERSON_ID_HESAPC", "diag_date", "episode", "diag_codes")]
+
+##Checkpoint save of HES diabetes dataset.
+#saveRDS(diags, file = "~/rstudio_collab/CCU064/1_cohort_selection/diabetes_hes.Rds")
+
+
+##Collapsing HES diagnoses to single entries for each individual.
+##For loop on cohort extremely slow as expected, so other alternative.
+##First remove duplicated information, that is subsequent diagnosis for the same episode type.
+diags <- diags[order(diags$PERSON_ID_HESAPC, diags$diag_date), ]
+dupes <- duplicated(diags[, c("PERSON_ID_HESAPC", "episode")]) ##Getting dupes ignoring date.
+table(dupes)
+diags2 <- diags[!dupes, ]
+
+##Turn multiple rows for the same individual into columns (long to wide).
+##The goal is to have one individual per row, with multiple columns for each diagnosis event.
+diags_long <- diags2 %>%
+  group_by(PERSON_ID_HESAPC) %>%
+  arrange(diag_date) %>%
+  mutate(diag_date = as.character(diag_date)) %>%
+  mutate(rnum = 1:n()) %>%
+  pivot_longer(cols = c(diag_date, episode),
+               names_to = "vars",
+               values_to = "vals") %>%
+  pivot_wider(id_cols = PERSON_ID_HESAPC, 
+              names_from = c(vars, rnum), values_from = vals, names_sep = '')
+
+##Saving long format dataset.
+saveRDS(diags_long, file = "~/rstudio_collab/CCU064/1_cohort_selection/diabetes_hes.Rds")
+
+
+diags_long <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/diabetes_hes.Rds")
+
+##Adding the HES diabetes information to cohort and clean it up.
+newdat2 <- merge(newdat, diags_long, by = "PERSON_ID_HESAPC", all.x = T)
+newdat2 <- newdat2 %>%
+  mutate_at(vars(starts_with("diag_date")), funs(as.Date(., "%Y-%m-%d")))
+##Getting number of diagnoses prior to delivery and number of total T1D and T2D diagnoses.
+newdat2$last_diag <- rowSums(sapply(newdat2[, starts_with("diag_date", vars = names(newdat2))], `<=`, newdat2$deldate), na.rm = T)
+newdat2 <- merge(newdat2, t1dd, by = "PERSON_ID_HESAPC", all.x = T)
+newdat2[is.na(newdat2$T1D_count), "T1D_count"] <- 0
+newdat2 <- merge(newdat2, t2dd, by = "PERSON_ID_HESAPC", all.x = T)
+newdat2[is.na(newdat2$T2D_count), "T2D_count"] <- 0
+##Awful way of doing this but I've been losing hours searching for alternatives.
+newdat2$HES_DB_diagnosis_prev <- ifelse(newdat2$last_diag == 0, NA,
+  ifelse(newdat2$last_diag == 1,
+         newdat2$episode1,
+   ifelse(newdat2$last_diag == 2,
+          paste(newdat2$episode1, newdat2$episode2),
+    ifelse(newdat2$last_diag == 3,
+           paste(newdat2$episode1, newdat2$episode2, newdat2$episode3),
+     ifelse(newdat2$last_diag == 4,
+            paste(newdat2$episode1, newdat2$episode2, newdat2$episode3, newdat2$episode4),
+      ifelse(newdat2$last_diag == 5,
+             paste(newdat2$episode1, newdat2$episode2, newdat2$episode3, newdat2$episode4, newdat2$episode5),
+       ifelse(newdat2$last_diag == 6,
+              paste(newdat2$episode1, newdat2$episode2, newdat2$episode3, newdat2$episode4, newdat2$episode5, newdat2$episode6),
+              paste(newdat2$episode1, newdat2$episode2, newdat2$episode3, newdat2$episode4, newdat2$episode5, newdat2$episode6, newdat2$episode7))))))))
+
+##Concatenating all diagnoses just in case. Also remove now useless columns.
+newdat2 <- newdat2 %>% unite("HES_DB_diagnosis_all", seq(20,32,2), sep = " ", remove = T, na.rm = T) %>%
+  select(!starts_with("diag_date") & !c("last_diag"))
+newdat2[newdat2$HES_DB_diagnosis_all == "", "HES_DB_diagnosis_all"] <- NA ##Getting NAs back in.
+
+##Categorise particular diabetes types.
+newdat2$HES_diabetes <- grepl("T2D|T1D|other", newdat2$HES_DB_diagnosis_prev, ignore.case = T)
+newdat2$HES_GDM <- grepl("^GDM", newdat2$HES_DB_diagnosis_prev, ignore.case = T)
+newdat2$HES_T2D <- grepl("T2D", newdat2$HES_DB_diagnosis_prev, ignore.case = T)
+newdat2$HES_T1D <- grepl("T1D", newdat2$HES_DB_diagnosis_prev, ignore.case = T)
+
+##Collapse dataset per individual to get prevalence.
+prev <- newdat2[!duplicated(newdat2$PERSON_ID_HESAPC, fromLast = T), ]
+prev$HES_diabetes <- grepl("T2D|T1D|other", prev$HES_DB_diagnosis_all, ignore.case = T)
+prev$HES_GDM <- grepl("^GDM", prev$HES_DB_diagnosis_all, ignore.case = T)
+prev$HES_T2D <- grepl("T2D", prev$HES_DB_diagnosis_all, ignore.case = T)
+prev$HES_T1D <- grepl("T1D", prev$HES_DB_diagnosis_all, ignore.case = T)
+
+
+##Checkpoint save of cohort + HES diabetes data.
+saveRDS(newdat2, file = "~/rstudio_collab/CCU064/1_cohort_selection/cohort_DB2.Rds")
+
+rm(dupes, newdat, diags, diags2, diags_long, prev, t1dd, t2dd)
+
+```

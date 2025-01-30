@@ -1,0 +1,443 @@
+---
+title: "CCU064 GDPPR Ethnicity Incorporation"
+author: "CSS"
+date: "2024-03-13"
+output: html_document
+---
+
+```{r c1, include=FALSE, eval=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(odbc)
+library(DBI)
+library(dplyr)
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+setwd("~/collab/CCU064/1_cohort_selection")
+
+##Load up the cohort.
+newdat <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/clean_hes.Rds")
+moms <- unique(newdat$PERSON_ID_HESAPC) ##IDs to filter datasets.
+
+```
+
+```{r gdppr_read, include=FALSE, eval=FALSE}
+
+##Too big, read chunks by date.
+gdppr1 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '1970-01-01' AND '1999-12-31'
+                   AND SEX = '2'")
+gdppr1 <- gdppr1[gdppr1$NHS_NUMBER_DEID %in% moms, ]
+
+gdppr2 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2000-01-01' AND '2001-12-31'
+                   AND SEX = '2'")
+gdppr2 <- gdppr2[gdppr2$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr1, gdppr2)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr1, gdppr2)
+
+gdppr3 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2002-01-01' AND '2003-12-31'
+                   AND SEX = '2'")
+gdppr3 <- gdppr3[gdppr3$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr3)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr3)
+
+gdppr4 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2004-01-01' AND '2005-12-31'
+                   AND SEX = '2'")
+gdppr4 <- gdppr4[gdppr4$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr4)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr4)
+
+gdppr5 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2006-01-01' AND '2007-12-31'
+                   AND SEX = '2'")
+gdppr5 <- gdppr5[gdppr5$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr5)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr5)
+
+gdppr6 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2008-01-01' AND '2009-12-31'
+                   AND SEX = '2'")
+gdppr6 <- gdppr6[gdppr6$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr6)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr6)
+
+gdppr7 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2010-01-01' AND '2011-12-31'
+                   AND SEX = '2'")
+gdppr7 <- gdppr7[gdppr7$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr7)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr7)
+
+gdppr8 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2012-01-01' AND '2013-12-31'
+                   AND SEX = '2'")
+gdppr8 <- gdppr8[gdppr8$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr8)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr8)
+
+gdppr9 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2014-01-01' AND '2015-12-31'
+                   AND SEX = '2'")
+gdppr9 <- gdppr9[gdppr9$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr9)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr9)
+
+gdppr10 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2016-01-01' AND '2017-12-31'
+                   AND SEX = '2'")
+gdppr10 <- gdppr10[gdppr10$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr10)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr10)
+
+
+gdppr11 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2018-01-01' AND '2018-06-30'
+                   AND SEX = '2'")
+gdppr11 <- gdppr11[gdppr11$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr11)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr11)
+
+gdppr12 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2018-07-01' AND '2018-10-31'
+                   AND SEX = '2'")
+gdppr12 <- gdppr12[gdppr12$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr12)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr12)
+
+gdppr13 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2018-11-01' AND '2019-01-31'
+                   AND SEX = '2'")
+gdppr13 <- gdppr13[gdppr13$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr13)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr13)
+
+gdppr14 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2019-02-01' AND '2019-04-30'
+                   AND SEX = '2'")
+gdppr14 <- gdppr14[gdppr14$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr14)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr14)
+
+gdppr15 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2019-05-01' AND '2019-07-31'
+                   AND SEX = '2'")
+gdppr15 <- gdppr15[gdppr15$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr15)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr15)
+
+
+gdppr16 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2019-08-01' AND '2019-09-30'
+                   AND SEX = '2'")
+gdppr16 <- gdppr16[gdppr16$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr16)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr16)
+
+##Too big now to even read two months at the same time.
+gdppr17 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2019-10-01' AND '2019-11-01'
+                   AND SEX = '2'")
+gdppr17 <- gdppr17[gdppr17$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr17)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr17)
+
+gdppr18 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2019-11-02' AND '2019-12-01'
+                   AND SEX = '2'")
+gdppr18 <- gdppr18[gdppr18$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr18)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr18)
+
+gdppr19 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2019-12-02' AND '2020-01-01'
+                   AND SEX = '2'")
+gdppr19 <- gdppr19[gdppr19$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr19)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr19)
+
+gdppr20 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2020-01-02' AND '2020-03-01'
+                   AND SEX = '2'")
+gdppr20 <- gdppr20[gdppr20$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr20)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr20)
+
+
+gdppr21 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2020-03-02' AND '2020-05-01'
+                   AND SEX = '2'")
+gdppr21 <- gdppr21[gdppr21$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr21)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr21)
+
+gdppr22 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2020-05-02' AND '2020-07-01'
+                   AND SEX = '2'")
+gdppr22 <- gdppr22[gdppr22$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr22)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr22)
+
+gdppr23 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2020-07-02' AND '2020-09-01'
+                   AND SEX = '2'")
+gdppr23 <- gdppr23[gdppr23$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr23)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr23)
+
+gdppr24 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2020-09-02' AND '2020-11-01'
+                   AND SEX = '2'")
+gdppr24 <- gdppr24[gdppr24$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr24)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr24)
+
+gdppr25 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2020-11-02' AND '2021-01-01'
+                   AND SEX = '2'")
+gdppr25 <- gdppr25[gdppr25$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr25)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr25)
+
+
+gdppr26 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2021-01-02' AND '2021-03-01'
+                   AND SEX = '2'")
+gdppr26 <- gdppr26[gdppr26$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr26)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr26)
+
+gdppr27 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2021-03-02' AND '2021-05-01'
+                   AND SEX = '2'")
+gdppr27 <- gdppr27[gdppr27$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr27)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr27)
+
+gdppr28 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2021-05-02' AND '2021-07-01'
+                   AND SEX = '2'")
+gdppr28 <- gdppr28[gdppr28$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr28)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr28)
+
+gdppr29 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2021-07-02' AND '2021-09-01'
+                   AND SEX = '2'")
+gdppr29 <- gdppr29[gdppr29$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr29)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr29)
+
+gdppr30 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2021-09-02' AND '2021-11-01'
+                   AND SEX = '2'")
+gdppr30 <- gdppr30[gdppr30$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr30)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr30)
+
+
+gdppr31 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2021-11-02' AND '2022-01-01'
+                   AND SEX = '2'")
+gdppr31 <- gdppr31[gdppr31$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr31)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr31)
+
+gdppr32 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2022-01-02' AND '2022-03-01'
+                   AND SEX = '2'")
+gdppr32 <- gdppr32[gdppr32$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr32)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr32)
+
+gdppr33 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2022-03-02' AND '2022-05-01'
+                   AND SEX = '2'")
+gdppr33 <- gdppr33[gdppr33$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr33)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr33)
+
+gdppr34 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2022-05-02' AND '2022-07-01'
+                   AND SEX = '2'")
+gdppr34 <- gdppr34[gdppr34$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr34)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr34)
+
+gdppr35 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2022-07-02' AND '2022-09-01'
+                   AND SEX = '2'")
+gdppr35 <- gdppr35[gdppr35$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr35)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr35)
+
+
+gdppr36 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2022-09-02' AND '2022-11-01'
+                   AND SEX = '2'")
+gdppr36 <- gdppr36[gdppr36$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr36)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr36)
+
+gdppr37 <- dbGetQuery(con, "SELECT NHS_NUMBER_DEID, ETHNIC, RECORD_DATE
+                  FROM dars_nic_391419_j3w9t_collab.gdppr_dars_nic_391419_j3w9t_archive
+                  WHERE archived_on = '2023-12-27'
+                   AND RECORD_DATE BETWEEN '2022-11-02' AND '2023-01-01'
+                   AND SEX = '2'")
+gdppr37 <- gdppr37[gdppr37$NHS_NUMBER_DEID %in% moms, ]
+gdppr <- rbind(gdppr, gdppr37)
+gdppr <- gdppr[order(gdppr$RECORD_DATE, decreasing = T), ]
+gdppr <- gdppr[!duplicated(gdppr$NHS_NUMBER_DEID), ]
+rm(gdppr37)
+
+
+##Progress save!
+saveRDS(gdppr, file = "~/collab/CCU064/1_cohort_selection/gdppr_ethno.Rds")
+
+```
+

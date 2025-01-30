@@ -1,0 +1,389 @@
+---
+title: "CCU064 MSDS Data Incorporation"
+author: "CSS"
+date: "2024-02-28"
+output: html_document
+---
+
+```{r msds_bmi, include=FALSE, eval=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+##This chunk won't be evaluated automatically when knitting due to long query times. Evaluate manually.
+library(odbc)
+library(DBI)
+library(dplyr)
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+setwd("~/collab/CCU064/1_cohort_selection")
+
+##Load up the cohort.
+cohort <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/cohort_DB2.Rds")
+cohort$covid <- NA
+cohort[which(cohort$deldate < "2020-04-01"), "covid"] <- "pre"
+cohort[which(cohort$deldate >= "2020-04-01"), "covid"] <- "post"
+
+cohort2 <- cohort[!duplicated(cohort$PERSON_ID_HESAPC), ]
+moms <- unique(cohort2$PERSON_ID_HESAPC)
+
+
+##Adding info from MSDS
+#########################
+##Step 1. Check MSDS demographics, pregnancy, and labour information.
+##Very high missingness for BMI, smoking, and alcohol. Not useful at all.
+
+msds <- dbGetQuery(con, "SELECT AntenatalAppDate, PregFirstConDate, Person_ID_Mother_DEID, UniqPregID, EthnicCategoryMother, Rank_IMD_Decile_2015,
+AlcoholUnitsBooking, SmokingStatusBooking, PersonBMIBooking,
+ComplexSocialFactorsInd, EmploymentStatusMother, EmploymentStatusPartner, AgeAtBookingMother, EDDAgreed, pseudo_UniqueLabourDeliveryID, LabourOnsetMethod, LabourOnsetDate
+                   FROM dars_nic_391419_j3w9t_collab.msds_v2_demographics_booking_and_pregnancy_all_years_archive
+                   WHERE archived_on = '2024-06-04'
+                   AND Person_ID_Mother_DEID IS NOT NULL
+                   AND Person_ID_Mother_DEID != ''
+                   AND (AntenatalAppDate BETWEEN '2017-01-01' AND '2022-12-31'
+                   OR PregFirstConDate BETWEEN '2017-01-01' AND '2022-12-31')")
+
+msds <- msds[!duplicated(msds), ]
+length(unique(msds$Person_ID_Mother_DEID)) ##4.2 mil entries for 2.3 mil women.
+prop.table(table(unique(msds$Person_ID_Mother_DEID) %in% moms))*100 ##83.1% in HES.
+
+round(100-colMeans(is.na(msds))*100,2) ##Completeness %.
+
+##Investigating duplicated IDs.
+dupes <- msds[msds$Person_ID_Mother_DEID %in% msds[duplicated(msds$Person_ID_Mother_DEID), "Person_ID_Mother_DEID"], ]
+rm(msds, dupes)
+
+
+##Mother observations for BMI, height and weight from Findings + Observations table.
+##To select max archived_on: WHERE archived_on = (SELECT MAX(archived_on) FROM dars_nic_391419_j3w9t_collab.msds_v2_findings_and_observations_all_years_archive)
+m_obs <- dbGetQuery(con, "SELECT person_id_mother_deid, obsdate, obscode, obsvalue, ucumunit, uniqpregid
+                   FROM dars_nic_391419_j3w9t_collab.msds_v2_findings_and_observations_all_years_archive
+                   WHERE archived_on = '2024-06-04'
+                   AND person_id_mother_deid IS NOT NULL
+                   AND person_id_mother_deid != ''
+                   AND obsdate BETWEEN '2015-01-01' AND '2024-12-31'
+                   AND obscode IN ('50373000','248333004','248327008','27113001','363808001','107647005','60621009')")
+
+m_obs <- m_obs[!duplicated(m_obs), ]
+m_obs <- m_obs[!is.na(m_obs$obsvalue), ]
+
+##Divide by measurement and fix magnitudes.
+m_obs$obsvalue <- as.numeric(m_obs$obsvalue)
+prop.table(table(m_obs$obscode))*100
+
+##BMI
+m_bmi <- m_obs[m_obs$obscode == '60621009', ]
+table(m_bmi$ucumunit)
+summary(m_bmi$obsvalue)
+m_bmi <- m_bmi[m_bmi$obsvalue >= 10 & m_bmi$obsvalue <= 70, ] ##Limit to 10 - 70.
+
+##Height
+m_hgt <- m_obs[m_obs$obscode %in% c('50373000','248333004','248327008'), ]
+table(m_hgt$ucumunit)
+m_hgt[grep("cm", m_hgt$ucumunit, ignore.case = T), "obsvalue"] <- m_hgt[grep("cm", m_hgt$ucumunit, ignore.case = T), ]$obsvalue / 100 ##cm to m.
+m_hgt[is.na(m_hgt$ucumunit) & m_hgt$obsvalue > 100, "obsvalue"] <- m_hgt[is.na(m_hgt$ucumunit) & m_hgt$obsvalue > 100, ]$obsvalue / 100 ##NA unit, likely cm to m.
+summary(m_hgt$obsvalue)
+m_hgt <- m_hgt[m_hgt$obsvalue >= 1 & m_hgt$obsvalue <= 2.5, ] ##Limit to 1m - 2.5m.
+
+##Weight
+m_wgt <- m_obs[m_obs$obscode %in% c('27113001','363808001','107647005'), ]
+table(m_wgt$ucumunit)
+m_wgt[grep("^g$", m_wgt$ucumunit, ignore.case = T), "obsvalue"] <- m_wgt[grep("^g$", m_wgt$ucumunit, ignore.case = T), ]$obsvalue / 1000 ##g to kg.
+m_wgt[is.na(m_wgt$ucumunit) & m_wgt$obsvalue > 1000, "obsvalue"] <- m_wgt[is.na(m_wgt$ucumunit) & m_wgt$obsvalue > 1000, ]$obsvalue / 1000 ##NA unit, likely g to kg.
+summary(m_wgt$obsvalue)
+m_wgt <- m_wgt[m_wgt$obsvalue >= 20 & m_wgt$obsvalue <= 200, ] ##Limit to 20kg - 200kg.
+
+##Trying to merge height with weight.
+m_wgt$wgtdate <- m_wgt$obsdate
+m_wgt$weight <- m_wgt$obsvalue
+m_hgt$hgtdate <- m_hgt$obsdate
+m_hgt$height <- m_hgt$obsvalue
+m_bmi$bmidate <- m_bmi$obsdate
+m_bmi$bmi <- m_bmi$obsvalue
+
+m_bmi2 <- merge(m_hgt[,c(1,6:8)], m_wgt[,c(1,6:8)], by = c("person_id_mother_deid", "uniqpregid"), all = T)
+table("height" = is.na(m_bmi2$height), "weight" = is.na(m_bmi2$weight))
+m_bmi2 <- m_bmi2[!is.na(m_bmi2$height) & !is.na(m_bmi2$weight), ] ##Removing cases of missing height or weight.
+m_bmi3 <- merge(m_bmi[,c(1,6:8)], m_bmi2, by = c("person_id_mother_deid", "uniqpregid"), all = T)
+m_bmi3$BMI_MSDS <- m_bmi3$bmi
+m_bmi3[is.na(m_bmi3$bmi), "BMI_MSDS"] <- m_bmi3[is.na(m_bmi3$bmi),]$weight / m_bmi3[is.na(m_bmi3$bmi),]$height^2
+m_bmi3 <- m_bmi3[m_bmi3$BMI_MSDS >= 10 & m_bmi3$BMI_MSDS <= 70, ]
+
+##Picking the earliest observation for each pregnancy.
+m_bmi3 <- m_bmi3[order(m_bmi3$bmidate, m_bmi3$hgtdate, m_bmi3$wgtdate), ]
+m_obs <- m_bmi3[!duplicated(m_bmi3$uniqpregid), ]
+m_obs$BMI_date <- m_obs$bmidate
+m_obs[is.na(m_obs$BMI_date), "BMI_date"] <- m_obs[is.na(m_obs$BMI_date), "hgtdate"]
+m_obs$BMI_source <- "Observations"
+m_obs$PERSON_ID_HESAPC <- m_obs$person_id_mother_deid
+m_obs$UniqPregID <- m_obs$uniqpregid
+
+rm(m_bmi2, m_bmi3, m_hgt, m_wgt, m_bmi)
+
+
+##Getting the same info from MSDS Care Activities
+###################################################
+
+m_care <- dbGetQuery(con, "SELECT Person_ID_Mother_DEID, CContactDate, ObsCode, ObsValue, UCUMUNIT, UniqPregID, PersonHeight, PersonWeight
+                   FROM dars_nic_391419_j3w9t_collab.msds_v2_care_activities_all_years_archive
+                   WHERE archived_on = '2024-06-04'
+                   AND Person_ID_Mother_DEID IS NOT NULL
+                   AND Person_ID_Mother_DEID != ''
+                   AND CContactDate BETWEEN '2015-01-01' AND '2024-12-31'
+                   AND (ObsCode IN ('50373000','248333004','248327008','27113001','363808001','107647005','60621009')
+                   OR (PersonHeight IS NOT NULL AND PersonWeight IS NOT NULL))")
+
+m_care <- m_care[!duplicated(m_care), ]
+m_care <- m_care[!is.na(m_care$ObsValue), ]
+
+##Divide by measurement and fix magnitudes.
+m_care$ObsValue <- as.numeric(m_care$ObsValue)
+m_care$PersonHeight <- as.numeric(m_care$PersonHeight)
+m_care$PersonWeight <- as.numeric(m_care$PersonWeight)
+prop.table(table(m_care$ObsCode))*100
+
+##BMI
+m_bmi <- m_care[m_care$ObsCode == '60621009', ]
+table(m_bmi$UCUMUNIT)
+summary(m_bmi$ObsValue)
+m_bmi <- m_bmi[m_bmi$ObsValue >= 10 & m_bmi$ObsValue <= 70, ] ##Limit to 10 - 70.
+
+##Height
+m_hgt <- m_care[m_care$ObsCode %in% c('50373000','248333004','248327008') | !is.na(m_care$PersonHeight), ]
+table(m_hgt$UCUMUNIT)
+m_hgt[grep("cm", m_hgt$UCUMUNIT, ignore.case = T), "ObsValue"] <- m_hgt[grep("cm", m_hgt$UCUMUNIT, ignore.case = T), ]$ObsValue / 100 ##cm to m.
+m_hgt[is.na(m_hgt$UCUMUNIT) & m_hgt$obsvalue > 100, "ObsValue"] <- m_hgt[is.na(m_hgt$UCUMUNIT) & m_hgt$ObsValue > 100, ]$ObsValue / 100 ##NA unit, likely cm to m.
+m_hgt[grep("in", m_hgt$UCUMUNIT, ignore.case = T), "ObsValue"] <- m_hgt[grep("in", m_hgt$UCUMUNIT, ignore.case = T), ]$ObsValue * 0.0254 ##inches to m.
+summary(m_hgt$ObsValue)
+##Adding the PersonHeight info.
+summary(m_hgt$PersonHeight)
+m_hgt$PersonHeight <- m_hgt$PersonHeight / 100 ##cm to m.
+m_hgt <- m_hgt[m_hgt$ObsValue >= 1 & m_hgt$ObsValue <= 2.5 | m_hgt$PersonHeight >= 1 & m_hgt$PersonHeight <= 2.5, ] ##Limit to 1m - 2.5m.
+table("Code" = is.na(m_hgt$ObsValue), "Height" = is.na(m_hgt$PersonHeight)) ##No new data from PersonHeight, used to clean.
+m_hgt$height <- m_hgt$ObsValue
+m_hgt[which(m_hgt$ObsValue < 1 | m_hgt$ObsValue > 2.5), "height"] <- m_hgt[which(m_hgt$ObsValue < 1 | m_hgt$ObsValue > 2.5), "PersonHeight"]
+summary(m_hgt$height)
+
+##Weight
+m_wgt <- m_care[m_care$ObsCode %in% c('27113001','363808001','107647005') | !is.na(m_care$PersonWeight), ]
+table(m_wgt$UCUMUNIT)
+summary(m_wgt$ObsValue)
+m_wgt[grep("^g$", m_wgt$UCUMUNIT, ignore.case = T), "ObsValue"] <- m_wgt[grep("^g$", m_wgt$UCUMUNIT, ignore.case = T), ]$ObsValue / 1000 ##g to kg.
+m_wgt[grep("lb", m_wgt$UCUMUNIT, ignore.case = T), "ObsValue"] <- m_wgt[grep("lb", m_wgt$UCUMUNIT, ignore.case = T), ]$ObsValue * 0.453592 ##lb to kg.
+summary(m_wgt$ObsValue)
+##Adding the PersonWeight info.
+summary(m_wgt$PersonWeight)
+m_wgt <- m_wgt[m_wgt$ObsValue >= 20 & m_wgt$ObsValue <= 200 | m_wgt$PersonWeight >= 20 & m_wgt$PersonWeight <= 200, ] ##Limit to 20kg - 200kg.
+table("Code" = is.na(m_wgt$ObsValue), "Weight" = is.na(m_wgt$PersonWeight)) ##No new data from PersonHeight, used to clean.
+m_wgt$weight <- m_wgt$ObsValue
+m_wgt[which(m_wgt$ObsValue < 20 | m_wgt$ObsValue > 200), "weight"] <- m_wgt[which(m_wgt$ObsValue < 20 | m_wgt$ObsValue > 200), "PersonWeight"]
+summary(m_wgt$weight)
+
+##Trying to merge height with weight.
+m_wgt$wgtdate <- m_wgt$CContactDate
+m_hgt$hgtdate <- m_hgt$CContactDate
+m_bmi$bmidate <- m_bmi$CContactDate
+m_bmi$bmi <- m_bmi$ObsValue
+
+##Too big to merge like the other dataset. First trim, then merge.
+m_hgt <- m_hgt[order(m_hgt$hgtdate),]
+m_wgt <- m_wgt[order(m_wgt$wgtdate),]
+m_hgt <- m_hgt[!duplicated(m_hgt$UniqPregID), ] ##Taking first observations per pregnancy.
+m_wgt <- m_wgt[!duplicated(m_wgt$UniqPregID), ]
+m_bmi2 <- merge(m_hgt[,c(1,6,9,10)], m_wgt[,c(1,6,9,10)], by = c("Person_ID_Mother_DEID", "UniqPregID"), all = F)
+m_bmi2 <- m_bmi2[!duplicated(m_bmi2), ]
+m_bmi3 <- merge(m_bmi[,c(1,6,9,10)], m_bmi2, by = c("Person_ID_Mother_DEID", "UniqPregID"), all = T)
+m_bmi3$BMI_MSDS <- m_bmi3$bmi
+m_bmi3[is.na(m_bmi3$bmi), "BMI_MSDS"] <- m_bmi3[is.na(m_bmi3$bmi),]$weight / m_bmi3[is.na(m_bmi3$bmi),]$height^2
+m_bmi3 <- m_bmi3[m_bmi3$BMI_MSDS >= 10 & m_bmi3$BMI_MSDS <= 70, ]
+
+##Picking the earliest observation for each pregnancy.
+m_bmi3 <- m_bmi3[order(m_bmi3$bmidate, m_bmi3$hgtdate, m_bmi3$wgtdate), ]
+m_care <- m_bmi3[!duplicated(m_bmi3$UniqPregID), ]
+m_care$BMI_date <- m_care$bmidate
+m_care[is.na(m_care$BMI_date), "BMI_date"] <- m_care[is.na(m_care$BMI_date), "hgtdate"]
+m_care$BMI_source <- "Activities"
+m_care$PERSON_ID_HESAPC <- m_care$Person_ID_Mother_DEID
+
+rm(m_bmi2, m_bmi3, m_hgt, m_wgt, m_bmi)
+
+
+##Merging both sources.
+m_BMI <- rbind(m_care[,c(12,2,9:11)], m_obs[,c(12,13,9:11)])
+m_BMI <- m_BMI[order(m_BMI$BMI_date), ]
+m_BMI <- m_BMI[!duplicated(m_BMI$UniqPregID), ]
+m_BMI <- m_BMI[!m_BMI$BMI_date < "2018-01-01", ] ##Only one observation before 2018 (mistake?)
+
+
+##Checking BMI within MSDS.
+dum <- m_BMI %>% group_by(month = floor_date(BMI_date, "month")) %>% summarize(n = n(),  BMI = mean(BMI_MSDS, na.rm = T), sd = sd(BMI_MSDS, na.rm = T))
+dum2 <- m_BMI %>% group_by(year = floor_date(BMI_date, "year")) %>% summarize(n = n(), BMI = mean(BMI_MSDS, na.rm = T), sd = sd(BMI_MSDS, na.rm = T))
+
+ggplot(data = dum) + geom_smooth(aes(x = month, y = BMI), method = "gam", color = "#5a97fa") +  theme_minimal() + labs(x = "Observation Date", y = "Mean BMI") +
+  scale_x_date(date_breaks = "4 months", date_labels = "%b%Y") + theme(axis.text.x = element_text(angle = 90)) +
+  geom_line(aes(x = month, y = BMI), stat = "smooth", method = "lm", color = "black", alpha = 0.8, linetype = 2, size = 0.8)
+
+hist(m_BMI$BMI_MSDS, breaks = 30, main = "Histogram of BMI")
+
+
+#saveRDS(m_BMI, file = "~/collab/CCU064/1_cohort_selection/BMI_MSDS.Rds")
+m_BMI <- readRDS("/db-mnt/databricks/rstudio_collab/CCU064/1_cohort_selection/BMI_MSDS.Rds")
+
+
+##Merge with cohort. Link by closest date, then calculate difference and remove far apart.
+m_BMI$preg_ID_BMI <- m_BMI$UniqPregID
+m_BMI$mom_ID <- m_BMI$PERSON_ID_HESAPC
+
+m_BMI <- m_BMI[order(m_BMI$BMI_date),]
+m_BMI <- m_BMI[!duplicated(m_BMI$preg_ID_BMI), ] ##1st observation per pregnancy
+
+dum <- left_join(cohort, m_BMI[, c(-1,-2)], by = "mom_ID") %>%
+  mutate(date_diff = as.integer(difftime(deldate, BMI_date, units = c("days")))) ##Merge with cohort.
+
+noBMI <- dum[is.na(dum$preg_ID_BMI), ]
+yesBMI <- dum[!is.na(dum$preg_ID_BMI), ]
+
+##Removing observations after 20 weeks gestation, also removing those after delivery.
+yesBMI[which(yesBMI$date_diff < 140), c("BMI_MSDS", "BMI_date", "date_diff")] <- c(NA, NA, NA)
+##Removing observations over 300 days before delivery date, also prior delivery.
+yesBMI[which(yesBMI$date_diff > 300), c("BMI_MSDS", "BMI_date", "date_diff")] <- c(NA, NA, NA)
+
+##Removing duplicates when there's multiple minimum date_diff, keeping unique pregnancy.
+yesBMI <- yesBMI[order(yesBMI$mom_ID, yesBMI$deldate, -yesBMI$date_diff), ]
+yesBMI2 <- yesBMI[!duplicated(yesBMI[,c("mom_ID", "deldate")]), ]
+
+dum <- rbind(noBMI,yesBMI2) ##Merging back into cohort.
+
+summary(dum$date_diff/7)
+hist(dum$date_diff/7, breaks = 30, main = "Delivery Date vs. BMI Observation", xlab = "Difference in Weeks")
+summary(dum$BMI_date)
+
+hist(dum$BMI_MSDS, breaks = 30, main = "BMI in the Cohort")
+
+ggplot(data = dum) + geom_smooth(aes(x = BMI_date, y = BMI_MSDS), method = "gam", color = "#5a97fa") +  theme_minimal() + labs(x = "Observation Date", y = "Mean BMI") +
+  scale_x_date(date_breaks = "4 months", date_labels = "%b%Y") + theme(axis.text.x = element_text(angle = 90)) +
+  geom_line(aes(x = BMI_date, y = BMI_MSDS), stat = "smooth", method = "lm", color = "black", alpha = 0.8, linetype = 2, size = 0.8)
+
+ggplot(data = dum) + geom_smooth(aes(x = deldate, y = BMI_MSDS), method = "gam", color = "#5a97fa") +  theme_minimal() + labs(x = "Delivery Date", y = "Mean BMI") +
+  scale_x_date(date_breaks = "4 months", date_labels = "%b%Y") + theme(axis.text.x = element_text(angle = 90)) +
+  geom_line(aes(x = deldate, y = BMI_MSDS), stat = "smooth", method = "lm", color = "black", alpha = 0.8, linetype = 2, size = 0.8)
+
+dum2 <- dum %>% group_by(year = floor_date(deldate, "year")) %>% summarise(n = n(), nbmi = sum(!is.na(BMI_MSDS)), bmiperc = nbmi/n*100, BMI = mean(BMI_MSDS, na.rm = T), sd = sd(BMI_MSDS, na.rm = T))
+dum3 <- dum %>% group_by(covid) %>% summarise(n = n(), nbmi = sum(!is.na(BMI_MSDS)), bmiperc = nbmi/n*100, BMI = mean(BMI_MSDS, na.rm = T))
+
+rm(dum2, dum3)
+
+
+##Quick exploration of BMI
+############################
+dum2 <- dum %>% group_by(month = floor_date(deldate, "month")) %>% summarise(n = n(), BMI = mean(BMI_MSDS, na.rm = T), GDM = sum(HES_GDM)/n*100)
+
+
+scale <- max(dum2$BMI, na.rm = T)/max(dum2$GDM)
+ggplot(dum2) + geom_line(aes(x = month, y = BMI/scale), color = "black") + geom_line(aes(x = month, y = GDM), color = "#ad54d6") +
+  labs(x = "Delivery Date", y = "Monthly Count") + scale_x_date(date_breaks = "4 months", date_labels = "%b%Y") +
+  theme_minimal() + scale_y_continuous(sec.axis = sec_axis(~.*scale, name = "Mean BMI (black)")) +
+  labs(x = "Delivery Date", y = "GDM Percentage (purple)", color = '') + theme(axis.text.x = element_text(angle = 90))
+  
+dum$bmi_test <- round_any(dum$BMI_MSDS, 0.5)
+dum3 <- dum %>% group_by(bmi_test) %>% summarise(n = n(), GDM = sum(HES_GDM)/n*100, sd = sd(HES_GDM)/n*100)
+ggplot(dum3) + geom_line(aes(x = bmi_test, y = GDM), color = "#5a97fa")  +  theme_minimal() + labs(x = "BMI", y = "GDM %")
+
+m1 <- glm(HES_GDM ~ BMI_MSDS, data = dum, family = "binomial")
+
+dum2 <- dum %>% group_by(month = floor_date(deldate, "month"), IMD_cat) %>% summarise(dels = n(), BMI = mean(BMI_MSDS, na.rm = T))
+dum2 <- dum2[!is.na(dum2$IMD_cat), ]
+ggplot(dum2) + geom_line(aes(x = month, y = BMI, color = IMD_cat)) + geom_point(aes(x = month, y = BMI, color = IMD_cat)) +
+  scale_color_manual(breaks = c("Low", "Average", "High"), values=c("#518ae8", "#ad54d6", "#eb4034"), name = "Deprivation:") + 
+  theme_minimal() + labs(x = "Delivery Date", y = "Mean BMI within IMD Category") + scale_x_date(date_breaks = "4 months", date_labels = "%b%Y") +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + coord_cartesian(ylim = c(22,32))
+
+dum3 <- dum %>% group_by(month = floor_date(deldate, "month"), ethnos2) %>% summarise(dels = n(), BMI = mean(BMI_MSDS, na.rm = T))
+dum3 <- dum3[!is.na(dum3$ethnos2), ]
+
+ggplot(dum3) + geom_line(aes(x = month, y = BMI, color = ethnos2)) + geom_point(aes(x = month, y = BMI, color = ethnos2)) +
+  scale_color_manual(breaks = c("White Background", "Non White Background", "Unavailable"), values=c("#518ae8", "#ad54d6", "#eb4034"), name = "Ethnicity:") + 
+  theme_minimal() + labs(x = "Delivery Date", y = "Mean BMI within Ethnic Category") + scale_x_date(date_breaks = "4 months", date_labels = "%b%Y") +
+  theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + coord_cartesian(ylim = c(22,32))
+
+```
+
+
+```{r msds_baby, include=FALSE, eval=FALSE}
+
+##Step 2. Check MSDS baby demographics and outcomes.
+##BW is actually in "baby care activities".
+bbdemo <- dbGetQuery(con, "SELECT person_id_baby_deid, person_id_mother_deid, uniqpregid, yearofbirthbaby, monthofbirthbaby, dayofbirthbaby, pregoutcome, personphensex,
+gestationlengthbirth, deliverymethodcode, pseudo_uniquelabourdeliveryid, pseudo_uniquelocalfetalid, birthordermaternitysus
+                   FROM dars_nic_391419_j3w9t_collab.msds_v2_baby_demographics_all_years_archive
+                   WHERE archived_on = '2024-06-04'
+                   AND person_id_mother_deid IS NOT NULL
+                   AND person_id_mother_deid != ''
+                   AND yearofbirthbaby BETWEEN 2018 AND 2022")
+
+
+bbdemo <- bbdemo[!duplicated(bbdemo), ]
+length(unique(bbdemo$person_id_baby_deid))
+length(unique(bbdemo$person_id_mother_deid)) 
+length(unique(bbdemo$uniqpregid)) 
+bbdemo$DOB <- as.Date(paste(bbdemo$yearofbirthbaby, bbdemo$monthofbirthbaby, bbdemo$dayofbirthbaby, sep = "-"))
+round(colMeans(is.na(bbdemo))*100,2) ##General missingness.
+summary(bbdemo)
+
+##Investigating duplicated IDs.
+dupes <- bbdemo[bbdemo$person_id_baby_deid %in% bbdemo[duplicated(bbdemo$person_id_baby_deid), "person_id_baby_deid"], ]
+##Seem to be real duplicates with different PregID... (17k)
+bbdemo2 <- bbdemo[!duplicated(bbdemo$person_id_baby_deid),] ##Just take the first for the moment.
+
+names(bbdemo2)[c(2,3)] <- c("mom_ID_bbdemo", "preg_ID_bbdemo")
+
+##Baby activities for BW.
+bb <- dbGetQuery(con, "SELECT person_id_mother_deid, clininterdatebaby, obscode, obsvalue, ucumunit, birthweight, uniqpregid, person_id_baby_deid
+                   FROM dars_nic_391419_j3w9t_collab.msds_v2_baby_activities_all_years_archive
+                   WHERE archived_on = '2024-06-04'
+                   AND person_id_baby_deid IS NOT NULL
+                   AND person_id_baby_deid != ''
+                   AND clininterdatebaby BETWEEN '2018-01-01' AND '2023-02-01'
+                   AND (obscode IN ('364589006','27113001','363808001','50373000') OR birthweight IS NOT NULL)") ##Last code is birth length, not very used.
+
+
+bb <- bb[!duplicated(bb), ]
+length(unique(bb$person_id_baby_deid))
+length(unique(bb$person_id_mother_deid))
+length(unique(bb$uniqpregid))
+summary(bb)
+
+##Investigating duplicated IDs.
+dupes <- bb[bb$person_id_baby_deid %in% bb[duplicated(bb$person_id_baby_deid), "person_id_baby_deid"], ]
+
+
+##Getting BW from obscode and birthweight.
+bb$birthweight <- as.numeric(bb$birthweight)
+bb$obsvalue <- abs(as.numeric(bb$obsvalue))
+m_wgt <- bb[bb$obscode %in% c('364589006','27113001','363808001') | !is.na(bb$birthweight), ]
+table(m_wgt$ucumunit)
+summary(m_wgt$obsvalue)
+m_wgt[grep("^kg$|kilog", m_wgt$ucumunit, ignore.case = T), "obsvalue"] <- m_wgt[grep("^kg$|kilog", m_wgt$ucumunit, ignore.case = T), ]$obsvalue * 1000 ##kg to g.
+m_wgt <- m_wgt[-grep("score", m_wgt$ucumunit, ignore.case = T), ]
+summary(m_wgt$obsvalue)
+##Adding the PersonWeight info.
+summary(m_wgt$birthweight)
+m_wgt <- m_wgt[m_wgt$obsvalue >= 500 & m_wgt$obsvalue <= 7000 | m_wgt$birthweight >= 500 & m_wgt$birthweight <= 7000, ] ##Limit to 20kg - 200kg.
+table("Code" = is.na(m_wgt$obsvalue), "Weight" = is.na(m_wgt$birthweight)) ##No new data from birthweight, used to clean.
+m_wgt$BW <- m_wgt$obsvalue
+m_wgt[which(m_wgt$obsvalue < 500 | m_wgt$obsvalue > 7000), "BW"] <- m_wgt[which(m_wgt$obsvalue < 500 | m_wgt$obsvalue > 7000), "birthweight"]
+summary(m_wgt$BW)
+
+m_wgt <- m_wgt[!is.na(m_wgt$BW), c(1,2,7,8,9)]
+m_wgt <- m_wgt[order(m_wgt$clininterdatebaby), ]
+m_wgt <- m_wgt[!duplicated(m_wgt$person_id_baby_deid), ] ##Removing any dupes by earlier date.
+
+names(m_wgt)[c(1,2,3)] <- c("mom_ID_bbcare", "BW_date", "preg_ID_bbcare")
+
+##Merging BW to baby demo.
+bbdemo <- merge(bbdemo2, m_wgt, by = "person_id_baby_deid", all = T)
+rm(dupes,bbdemo2,m_wgt,bb)
+
+##Progress save!
+#saveRDS(bbdemo, file = "~/collab/CCU064/1_cohort_selection/baby_MSDS.Rds")
+
+```
