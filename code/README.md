@@ -1,6 +1,7 @@
 Analysis and curation code related to the analysis conducted for this project. All the code is also accessible within the CCU64 folder in RStudio Server in the NHS Data Access Environment.
 
-**Markdown Files:**
+## R Markdown Files:
+>
 **1_cohort_selection.Rmd:** Code to read HES data, clean and merge and define the cohort for the project. Produces:
   * merged_hes.Rds: preliminary dataset, after merging HES APC with HES Maternity.
   * clean_hes.Rds: final dataset with the base cohort information.
