@@ -1,0 +1,39 @@
+DELIVERY CODELIST
+ICD10:
+- O00-O08: Pregnancy with abortive outcome. (MISS)
+- O10-O16: Oedema, proteinuria and hypertensive disorders in pregnancy, childbirth and the puerperium. (CARE)
+- O20-O29: Other maternal disorders predominantly related to pregnancy. (CARE)
+- O30-O48: Maternal care related to the fetus and amniotic cavity and possible delivery problems. (CARE)
+- O60-O75: Complications of labour and delivery. (DEL)
+- O80-O84: Delivery. (DEL)
+- O85-O92: Complications predominantly related to the puerperium. (CARE)
+- O94-O99: Other obstetric conditions, not elsewhere classified. (CARE)
+- Z37, Z38: Delivery outcomes. (DEL)
+- Z32.1, Z33, Z34, Z35, Z36: Pregnancy supervision and screening. (CARE)
+- Z39: Postpartum care. (CARE)
+- P: Perinatal outcomes (PERI)
+
+OPCS4:
+- P141-P143: Episotomy (DEL)
+- R14-R19, R2, R30-R32 : Labour and delivery (DEL)
+- Q101, Q102, Q111-Q113, Q115-Q116, Q14, R03: Abortion and destruction of fetus (MISS)
+- Y95: Gestational age (CARE)
+
+#############################################
+
+DIABETES CODELIST
+ICD10:
+- E10-14: Diabetes mellitus.
+- G590, G632: Diabetic mono- and polyneuropathy.
+- H280, H360: Diebetic cataract and retinopathy.
+- M142: Diabetic arthropathy.
+- N082: Glomerular disorders in diabetes mellitus.
+- O240-O243: Pre-exixting diabetes mellitus in pregnancy.
+- O244: Diabetes mellitus arising in pregnancy (GDM)
+
+ICD9 (not used!):
+- 250: Diabetes mellitus.
+- 249: Secondary diabetes mellitus.
+- 6488: Gestational diabetes.
+
+  
