@@ -27,3 +27,20 @@ Analysis and curation code related to the analysis conducted for this project. A
 
 
 **6_manuscript_output.Rmd:** Code to produce the tables and figures accompanying the manuscript for publication.
+
+----
+#### R and Package version:
+>
+- Analyses performed in R Version 4.1.3. within RStudio Server version 2022.02.3 + 492.
+- Package "odbc" version 1.3.4.
+- Package "DBI" version 1.1.3.
+- Package "dplyr" version 1.0.10
+- Package "lubridate" version 1.8.0.
+- Package "ggplot2" version 3.3.6.
+- Package "tidyverse" version 1.3.2.
+- Package "kableExtra" version 1.4.0.
+- Package "gridExtra" version 2.3.
+- Package "scales" version 1.2.1.
+- Package "RColorBrewer" version 1.1-3.
+
+
