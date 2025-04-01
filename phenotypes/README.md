@@ -1,6 +1,8 @@
-Phenotype code lists related to the analysis conducted for this project:
-- **preg_DB_codes.txt:** simple list of ICD and OPCS codes used to define a pregnancy / delivery event and diabetes through the HES APC data. Not a table to import, used for reference. The actual code in "2_HES_DB_diagnoses.Rmd" contains the codelist in a grep() call.
-- **SDE_ethnicity_codes.txt:** table with codes used to define ethnicity in HES and GDPPR. A table to import.
+Phenotype code lists related to the analysis conducted for this project.
+- **birth.xlsx:** codelists used to identify finished pregnancies (births or abortions) in HES.
+- **diabetes.xlsx:** codelists used to identify gestational diabetes diagnoses and other diabetes diagnoses in HES.
+- **heightweight.xlsx:** codelists used to provide additional maternal features (height, weight and BMI) and birth weight from MSDS.
+- **SDE_ethnicity_codes.txt:** table with codes used to define ethnicity in HES and GDPPR.
 
 The ICD10, OPCS and SNOMED codes used in the project can also be found in the submitted manuscript:
 | Episode or Observation | Dataset | Code List |
